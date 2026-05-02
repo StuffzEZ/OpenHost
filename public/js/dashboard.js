@@ -586,6 +586,30 @@ document.addEventListener('alpine:init', () => {
         copy(text) {
             navigator.clipboard.writeText(text);
             this.showToast('Copied to clipboard!', 'success');
+        },
+
+        getGitHubYaml() {
+            if (!this.selectedProject) return '';
+            const webhookUrl = `http://${this.selectedProject.duckdns_subdomain}.${this.systemStats?.duckdns_root || 'duckdns.org'}/api/deployments/webhook`;
+            
+            return `name: Deploy to OpenHost
+on:
+  push:
+    branches: [ ${this.selectedProject.branch || 'main'} ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger OpenHost Re-deployment
+        run: |
+          curl -X POST "${webhookUrl}" \\
+          -H "Content-Type: application/json" \\
+          -d "{\\"projectId\\": \\"\${{ secrets.OPENHOST_PROJECT_ID }}\\", \\"token\\": \\"\${{ secrets.OPENHOST_DEPLOY_TOKEN }}\\"}"`;
+        },
+
+        copyGitHubYaml() {
+            this.copy(this.getGitHubYaml());
         }
     }));
 });

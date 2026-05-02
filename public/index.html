@@ -579,6 +579,7 @@
             <div class="flex border-b border-gray-100 bg-white px-6">
                 <button @click="projectTab = 'logs'" :class="projectTab === 'logs' ? 'border-black text-black' : 'border-transparent text-gray-400 hover:text-black'" class="px-4 py-3 border-b-2 font-medium text-sm transition-all">Deployment Logs</button>
                 <button @click="projectTab = 'config'" :class="projectTab === 'config' ? 'border-black text-black' : 'border-transparent text-gray-400 hover:text-black'" class="px-4 py-3 border-b-2 font-medium text-sm transition-all">Configuration</button>
+                <button @click="projectTab = 'github'" :class="projectTab === 'github' ? 'border-black text-black' : 'border-transparent text-gray-400 hover:text-black'" class="px-4 py-3 border-b-2 font-medium text-sm transition-all">GitHub Actions</button>
                 <button @click="projectTab = 'deployments'" :class="projectTab === 'deployments' ? 'border-black text-black' : 'border-transparent text-gray-400 hover:text-black'" class="px-4 py-3 border-b-2 font-medium text-sm transition-all">History</button>
             </div>
 
@@ -635,6 +636,56 @@
                                 <span class="text-gray-500">Custom Domain:</span>
                                 <a :href="'http://' + selectedProject?.duckdns_subdomain + '.' + (systemStats?.duckdns_root || 'duckdns.org')" target="_blank" class="font-bold text-blue-700 hover:underline" x-text="selectedProject?.duckdns_subdomain + '.' + (systemStats?.duckdns_root || 'duckdns.org')"></a>
                             </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- GitHub Actions Tab -->
+                <div x-show="projectTab === 'github'" class="p-6 space-y-6">
+                    <div x-show="!user?.can_use_duckdns" class="bg-red-50 p-6 rounded-xl border border-red-100 text-center">
+                        <i class="fas fa-lock text-red-400 text-3xl mb-4"></i>
+                        <h4 class="text-lg font-bold text-red-900">Premium Feature</h4>
+                        <p class="text-red-700">GitHub Workflow triggers are only available on plans with DuckDNS permissions. Upgrade your plan to enable CI/CD.</p>
+                    </div>
+
+                    <div x-show="user?.can_use_duckdns" class="space-y-6">
+                        <div class="bg-blue-50 p-4 rounded-lg flex items-start gap-3">
+                            <i class="fas fa-info-circle text-blue-500 mt-1"></i>
+                            <div class="text-sm text-blue-800">
+                                <p class="font-bold mb-1">How it works</p>
+                                <p>You can trigger a re-deployment automatically whenever you push code to GitHub. Add the following workflow file to your repository at <code>.github/workflows/deploy.yml</code>.</p>
+                            </div>
+                        </div>
+
+                        <div class="space-y-4">
+                            <h4 class="text-xs font-bold text-gray-400 uppercase tracking-widest">1. Set up GitHub Secrets</h4>
+                            <p class="text-sm text-gray-600">Go to your Repo Settings > Secrets and variables > Actions and add these secrets:</p>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div class="bg-gray-50 p-3 rounded border border-gray-200">
+                                    <div class="text-[10px] font-bold text-gray-400 uppercase mb-1">Secret Name</div>
+                                    <div class="font-mono text-sm">OPENHOST_PROJECT_ID</div>
+                                    <div class="mt-2 flex justify-between items-center">
+                                        <code class="text-xs text-blue-600" x-text="selectedProject?.id"></code>
+                                        <button @click="copy(selectedProject?.id)" class="text-xs text-gray-400 hover:text-black font-bold">COPY</button>
+                                    </div>
+                                </div>
+                                <div class="bg-gray-50 p-3 rounded border border-gray-200">
+                                    <div class="text-[10px] font-bold text-gray-400 uppercase mb-1">Secret Name</div>
+                                    <div class="font-mono text-sm">OPENHOST_DEPLOY_TOKEN</div>
+                                    <div class="mt-2 flex justify-between items-center">
+                                        <code class="text-xs text-blue-600">••••••••••••••••</code>
+                                        <button @click="copy(selectedProject?.deploy_token)" class="text-xs text-gray-400 hover:text-black font-bold">COPY TOKEN</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="space-y-4">
+                            <div class="flex justify-between items-center">
+                                <h4 class="text-xs font-bold text-gray-400 uppercase tracking-widest">2. Workflow YAML</h4>
+                                <button @click="copyGitHubYaml()" class="text-xs bg-black text-white px-3 py-1 rounded hover:bg-gray-800 transition-all">Copy YAML</button>
+                            </div>
+                            <pre class="bg-gray-900 p-4 rounded-lg text-green-400 text-xs font-mono overflow-x-auto" x-text="getGitHubYaml()"></pre>
                         </div>
                     </div>
                 </div>

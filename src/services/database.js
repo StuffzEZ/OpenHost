@@ -70,6 +70,7 @@ async function initDatabase() {
                 env_vars JSONB DEFAULT '{}',
                 cpu_limit VARCHAR(50) DEFAULT '0.5',
                 memory_limit VARCHAR(50) DEFAULT '512m',
+                deploy_token VARCHAR(255) UNIQUE,
                 status VARCHAR(50) DEFAULT 'inactive',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -102,6 +103,7 @@ async function initDatabase() {
             await client.query('ALTER TABLE databases ADD COLUMN IF NOT EXISTS db_password TEXT');
             await client.query('ALTER TABLE databases ADD COLUMN IF NOT EXISTS db_port INTEGER');
             await client.query('ALTER TABLE databases ADD COLUMN IF NOT EXISTS container_name VARCHAR(255)');
+            await client.query('ALTER TABLE projects ADD COLUMN IF NOT EXISTS deploy_token VARCHAR(255) UNIQUE');
             
             // Assign Free plan to existing users who don't have one
             const freePlan = await client.query('SELECT id FROM plans WHERE name = $1', ['Free']);

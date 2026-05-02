@@ -1,4 +1,5 @@
 const express = require('express');
+const { v4: uuidv4 } = require('uuid');
 const { query } = require('../services/database');
 const { authenticateToken } = require('../middleware/auth');
 const logger = require('../utils/logger');
@@ -24,6 +25,10 @@ router.post('/', authenticateToken, async (req, res) => {
     try {
         const { name, type, subdomain, git_url, branch, build_command, start_command, env_vars, duckdns_subdomain, cpu_limit, memory_limit } = req.body;
 
+        // SANITIZATION: Force limits to strings and validate values to prevent injection or bypass
+        const safeCpu = ['0.1', '0.25', '0.5', '1.0', '2.0'].includes(String(cpu_limit)) ? String(cpu_limit) : '0.5';
+        const safeMem = ['128m', '256m', '512m', '1024m', '2048m'].includes(String(memory_limit)) ? String(memory_limit) : '512m';
+
         // Check user quota
         const userQuota = await query(`
             SELECT p.max_projects, p.can_use_duckdns, COUNT(pr.id) as current_count
@@ -36,6 +41,8 @@ router.post('/', authenticateToken, async (req, res) => {
 
         if (userQuota.rows.length > 0) {
             const { max_projects, can_use_duckdns, current_count } = userQuota.rows[0];
+            
+            // STRICT QUOTA CHECK: prevent bypass by checking current count against plan limit
             if (parseInt(current_count) >= max_projects) {
                 return res.status(403).json({ error: `Project limit reached (${max_projects}). Upgrade your plan for more.` });
             }
@@ -46,10 +53,10 @@ router.post('/', authenticateToken, async (req, res) => {
 
         const result = await query(
             `INSERT INTO projects 
-            (user_id, name, type, subdomain, duckdns_subdomain, git_url, branch, build_command, start_command, env_vars, cpu_limit, memory_limit) 
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) 
+            (user_id, name, type, subdomain, duckdns_subdomain, git_url, branch, build_command, start_command, env_vars, cpu_limit, memory_limit, deploy_token) 
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) 
             RETURNING *`,
-            [req.user.userId, name, type, subdomain, duckdns_subdomain, git_url, branch || 'main', build_command, start_command, env_vars || {}, cpu_limit || '0.5', memory_limit || '512m']
+            [req.user.userId, name, type, subdomain, duckdns_subdomain, git_url, branch || 'main', build_command, start_command, env_vars || {}, safeCpu, safeMem, uuidv4()]
         );
 
         res.status(201).json({ project: result.rows[0] });

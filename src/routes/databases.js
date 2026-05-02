@@ -29,6 +29,11 @@ router.post('/', authenticateToken, async (req, res) => {
             return res.status(400).json({ error: 'Name and type are required' });
         }
 
+        // SANITIZATION: Prevent illegal characters in DB names/users that could bypass SQL quoting
+        if (!/^[a-zA-Z0-9_-]+$/.test(name) || (dbUser && !/^[a-zA-Z0-9_-]+$/.test(dbUser))) {
+            return res.status(400).json({ error: 'Database and User names must be alphanumeric (underscores allowed)' });
+        }
+
         // Check user quota
         const userQuota = await query(`
             SELECT p.max_databases, COUNT(d.id) as current_count
@@ -41,6 +46,8 @@ router.post('/', authenticateToken, async (req, res) => {
 
         if (userQuota.rows.length > 0) {
             const { max_databases, current_count } = userQuota.rows[0];
+            
+            // STRICT QUOTA CHECK
             if (parseInt(current_count) >= max_databases) {
                 return res.status(403).json({ error: `Database limit reached (${max_databases}). Upgrade your plan for more.` });
             }
