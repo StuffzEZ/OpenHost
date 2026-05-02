@@ -21,6 +21,7 @@ services:
       - POSTGRES_PASSWORD=changeme123
       - REDIS_HOST=redis
       - REDIS_PORT=6379
+      - MONGO_HOST=mongodb
       - JWT_SECRET=change-this-secret-key
       - ADMIN_EMAIL=admin@openhost.local
       - ADMIN_PASSWORD=admin123
@@ -29,6 +30,7 @@ services:
     depends_on:
       - postgres
       - redis
+      - mongodb
     restart: unless-stopped
     networks:
       - openhost-network
@@ -55,9 +57,22 @@ services:
     networks:
       - openhost-network
 
+  mongodb:
+    image: mongo:6
+    container_name: openhost-mongodb
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=admin
+      - MONGO_INITDB_ROOT_PASSWORD=adminpassword
+    volumes:
+      - mongodb-data:/data/db
+    restart: unless-stopped
+    networks:
+      - openhost-network
+
 volumes:
   postgres-data:
   redis-data:
+  mongodb-data:
 
 networks:
   openhost-network:

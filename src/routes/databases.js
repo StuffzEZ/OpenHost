@@ -73,7 +73,7 @@ router.delete('/:id', authenticateToken, async (req, res) => {
         }
 
         const db = result.rows[0];
-        await databaseService.stopDatabase(db.container_name);
+        await databaseService.stopDatabase(db.container_name, db.type, db.name, db.db_user);
 
         await query('DELETE FROM databases WHERE id = $1', [req.params.id]);
 
