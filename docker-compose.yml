@@ -27,6 +27,7 @@ services:
       - ADMIN_PASSWORD=admin123
       - DUCKDNS_TOKEN=${DUCKDNS_TOKEN:-}
       - DUCKDNS_ROOT_DOMAIN=${DUCKDNS_ROOT_DOMAIN:-}
+      - URL=${URL:-}
     depends_on:
       - postgres
       - redis

@@ -14,7 +14,7 @@ router.get('/', authenticateToken, async (req, res) => {
             node_version: process.version,
             platform: process.platform,
             uptime: process.uptime(),
-            duckdns_root: process.env.DUCKDNS_ROOT_DOMAIN || 'duckdns.org'
+            duckdns_root: process.env.URL || process.env.DUCKDNS_ROOT_DOMAIN || 'duckdns.org'
         };
         
         const userInfo = await query(`

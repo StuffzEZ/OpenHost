@@ -208,12 +208,12 @@ class DeploymentService {
             `${project.subdomain}.*`
         ];
         
-        const rootDomain = process.env.DUCKDNS_ROOT_DOMAIN;
+        const rootDomain = process.env.URL || process.env.DUCKDNS_ROOT_DOMAIN;
         if (project.duckdns_subdomain && rootDomain) {
-            // hello.world.duckdns.org
+            // hello.world.duckdns.org (or custom domain)
             domains.push(`${project.duckdns_subdomain}.${rootDomain}`);
         } else if (project.duckdns_subdomain) {
-            // Fallback to legacy behavior if no root domain is set
+            // Fallback to legacy behavior if no root domain or URL is set
             domains.push(`${project.duckdns_subdomain}.duckdns.org`);
         }
 
