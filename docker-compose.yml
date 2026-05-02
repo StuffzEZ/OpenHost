@@ -1,0 +1,63 @@
+version: '3.8'
+
+services:
+  openhost:
+    build: .
+    container_name: openhost-main
+    ports:
+      - "3000:3000"
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deployments:/app/deployments
+      - ./builds:/app/builds
+      - ./data:/app/data
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - NODE_ENV=production
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=openhost
+      - POSTGRES_USER=openhost
+      - POSTGRES_PASSWORD=changeme123
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - JWT_SECRET=change-this-secret-key
+      - ADMIN_EMAIL=admin@openhost.local
+      - ADMIN_PASSWORD=admin123
+    depends_on:
+      - postgres
+      - redis
+    restart: unless-stopped
+    networks:
+      - openhost-network
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: openhost-postgres
+    environment:
+      - POSTGRES_DB=openhost
+      - POSTGRES_USER=openhost
+      - POSTGRES_PASSWORD=changeme123
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    restart: unless-stopped
+    networks:
+      - openhost-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: openhost-redis
+    volumes:
+      - redis-data:/data
+    restart: unless-stopped
+    networks:
+      - openhost-network
+
+volumes:
+  postgres-data:
+  redis-data:
+
+networks:
+  openhost-network:
+    driver: bridge
