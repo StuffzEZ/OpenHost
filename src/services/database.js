@@ -13,6 +13,20 @@ const pool = new Pool({
 async function initDatabase() {
     const client = await pool.connect();
     try {
+        // Create plans table
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS plans (
+                id SERIAL PRIMARY KEY,
+                name VARCHAR(100) UNIQUE NOT NULL,
+                max_projects INTEGER DEFAULT 3,
+                max_databases INTEGER DEFAULT 2,
+                max_storage_mb INTEGER DEFAULT 500,
+                can_use_duckdns BOOLEAN DEFAULT false,
+                can_use_custom_env BOOLEAN DEFAULT true,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+
         // Create users table
         await client.query(`
             CREATE TABLE IF NOT EXISTS users (
@@ -20,10 +34,25 @@ async function initDatabase() {
                 email VARCHAR(255) UNIQUE NOT NULL,
                 password VARCHAR(255) NOT NULL,
                 is_admin BOOLEAN DEFAULT false,
+                plan_id INTEGER REFERENCES plans(id) ON DELETE SET NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         `);
+
+        // Create default plans if they don't exist
+        const defaultPlans = [
+            ['Free', 2, 1, 250, false, true],
+            ['Pro', 10, 5, 2000, true, true],
+            ['Unlimited', 999, 999, 50000, true, true]
+        ];
+
+        for (const [name, proj, db, storage, duck, env] of defaultPlans) {
+            await client.query(
+                'INSERT INTO plans (name, max_projects, max_databases, max_storage_mb, can_use_duckdns, can_use_custom_env) VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (name) DO NOTHING',
+                [name, proj, db, storage, duck, env]
+            );
+        }
 
         // Create projects table
         await client.query(`
@@ -39,30 +68,11 @@ async function initDatabase() {
                 build_command TEXT,
                 start_command TEXT,
                 env_vars JSONB DEFAULT '{}',
+                cpu_limit VARCHAR(50) DEFAULT '0.5',
+                memory_limit VARCHAR(50) DEFAULT '512m',
                 status VARCHAR(50) DEFAULT 'inactive',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        `);
-
-        // Migration: add duckdns_subdomain if not exists
-        try {
-            await client.query('ALTER TABLE projects ADD COLUMN IF NOT EXISTS duckdns_subdomain VARCHAR(100) UNIQUE');
-        } catch (e) {
-            logger.info('Migration: duckdns_subdomain column might already exist');
-        }
-
-        // Create deployments table
-        await client.query(`
-            CREATE TABLE IF NOT EXISTS deployments (
-                id SERIAL PRIMARY KEY,
-                project_id INTEGER REFERENCES projects(id) ON DELETE CASCADE,
-                version VARCHAR(50),
-                status VARCHAR(50) DEFAULT 'pending',
-                build_logs TEXT,
-                deploy_url TEXT,
-                deployed_at TIMESTAMP,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         `);
 
@@ -73,11 +83,34 @@ async function initDatabase() {
                 user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
                 name VARCHAR(100) NOT NULL,
                 type VARCHAR(50) NOT NULL,
+                db_user VARCHAR(100),
+                db_password TEXT,
+                db_port INTEGER,
+                container_name VARCHAR(255),
                 connection_string TEXT,
                 status VARCHAR(50) DEFAULT 'active',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         `);
+
+        // Migrations
+        try {
+            await client.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS plan_id INTEGER REFERENCES plans(id) ON DELETE SET NULL');
+            await client.query('ALTER TABLE projects ADD COLUMN IF NOT EXISTS cpu_limit VARCHAR(50) DEFAULT "0.5"');
+            await client.query('ALTER TABLE projects ADD COLUMN IF NOT EXISTS memory_limit VARCHAR(50) DEFAULT "512m"');
+            await client.query('ALTER TABLE databases ADD COLUMN IF NOT EXISTS db_user VARCHAR(100)');
+            await client.query('ALTER TABLE databases ADD COLUMN IF NOT EXISTS db_password TEXT');
+            await client.query('ALTER TABLE databases ADD COLUMN IF NOT EXISTS db_port INTEGER');
+            await client.query('ALTER TABLE databases ADD COLUMN IF NOT EXISTS container_name VARCHAR(255)');
+            
+            // Assign Free plan to existing users who don't have one
+            const freePlan = await client.query('SELECT id FROM plans WHERE name = $1', ['Free']);
+            if (freePlan.rows.length > 0) {
+                await client.query('UPDATE users SET plan_id = $1 WHERE plan_id IS NULL', [freePlan.rows[0].id]);
+            }
+        } catch (e) {
+            logger.info('Migrations: some columns or constraints might already exist');
+        }
 
         // Create default admin user if doesn't exist
         const adminEmail = process.env.ADMIN_EMAIL || 'admin@openhost.local';

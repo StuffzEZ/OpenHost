@@ -23,23 +23,64 @@ router.get('/', authenticateToken, async (req, res) => {
 // Create database
 router.post('/', authenticateToken, async (req, res) => {
     try {
-        const { name, type } = req.body;
+        const { name, type, dbUser, dbPassword, dbPort } = req.body;
 
         if (!name || !type) {
             return res.status(400).json({ error: 'Name and type are required' });
         }
 
-        const dbResult = await databaseService.createDatabase(type, name);
+        // Check user quota
+        const userQuota = await query(`
+            SELECT p.max_databases, COUNT(d.id) as current_count
+            FROM users u
+            JOIN plans p ON u.plan_id = p.id
+            LEFT JOIN databases d ON u.id = d.user_id
+            WHERE u.id = $1
+            GROUP BY p.max_databases
+        `, [req.user.userId]);
+
+        if (userQuota.rows.length > 0) {
+            const { max_databases, current_count } = userQuota.rows[0];
+            if (parseInt(current_count) >= max_databases) {
+                return res.status(403).json({ error: `Database limit reached (${max_databases}). Upgrade your plan for more.` });
+            }
+        }
+
+        const dbResult = await databaseService.createDatabase(type, name, dbUser, dbPassword, dbPort);
 
         const result = await query(
-            'INSERT INTO databases (user_id, name, type, connection_string) VALUES ($1, $2, $3, $4) RETURNING *',
-            [req.user.userId, name, type, dbResult.connectionString]
+            'INSERT INTO databases (user_id, name, type, db_user, db_password, db_port, container_name, connection_string) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *',
+            [req.user.userId, name, type, dbResult.dbUser, dbResult.dbPassword, dbResult.dbPort, dbResult.containerName, dbResult.connectionString]
         );
 
         res.status(201).json({ database: result.rows[0] });
     } catch (error) {
         logger.error('Create database error:', error);
         res.status(500).json({ error: error.message || 'Failed to create database' });
+    }
+});
+
+// Delete database
+router.delete('/:id', authenticateToken, async (req, res) => {
+    try {
+        const result = await query(
+            'SELECT * FROM databases WHERE id = $1 AND user_id = $2',
+            [req.params.id, req.user.userId]
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Database not found' });
+        }
+
+        const db = result.rows[0];
+        await databaseService.stopDatabase(db.container_name);
+
+        await query('DELETE FROM databases WHERE id = $1', [req.params.id]);
+
+        res.json({ message: 'Database deleted successfully' });
+    } catch (error) {
+        logger.error('Delete database error:', error);
+        res.status(500).json({ error: 'Failed to delete database' });
     }
 });
 

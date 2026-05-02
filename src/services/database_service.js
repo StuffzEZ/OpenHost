@@ -5,33 +5,34 @@ const logger = require('../utils/logger');
 const docker = new Docker({ socketPath: '/var/run/docker.sock' });
 
 class DatabaseService {
-    async createDatabase(type, name) {
+    async createDatabase(type, name, customUser, customPassword, customPort) {
         const dbId = uuidv4().substring(0, 8);
         const containerName = `openhost-db-${name}-${dbId}`;
-        const password = uuidv4();
+        const password = customPassword || uuidv4();
+        const dbUser = customUser || 'openhost';
         
         let image = '';
         let env = [];
-        let port = 0;
+        let port = customPort || 0;
         let connectionString = '';
 
         switch (type.toLowerCase()) {
             case 'postgres':
                 image = 'postgres:15-alpine';
-                env = [`POSTGRES_DB=${name}`, `POSTGRES_PASSWORD=${password}`, `POSTGRES_USER=openhost` ];
-                port = 5432;
-                connectionString = `postgres://openhost:${password}@${containerName}:${port}/${name}`;
+                port = port || 5432;
+                env = [`POSTGRES_DB=${name}`, `POSTGRES_PASSWORD=${password}`, `POSTGRES_USER=${dbUser}` ];
+                connectionString = `postgres://${dbUser}:${password}@${containerName}:${port}/${name}`;
                 break;
             case 'redis':
                 image = 'redis:7-alpine';
-                port = 6379;
+                port = port || 6379;
                 connectionString = `redis://:${password}@${containerName}:${port}`;
                 break;
             case 'mongodb':
                 image = 'mongo:6';
-                env = [`MONGO_INITDB_DATABASE=${name}`];
-                port = 27017;
-                connectionString = `mongodb://${containerName}:${port}/${name}`;
+                port = port || 27017;
+                env = [`MONGO_INITDB_DATABASE=${name}`, `MONGO_INITDB_ROOT_USERNAME=${dbUser}`, `MONGO_INITDB_ROOT_PASSWORD=${password}`];
+                connectionString = `mongodb://${dbUser}:${password}@${containerName}:${port}/${name}`;
                 break;
             default:
                 throw new Error(`Unsupported database type: ${type}`);
@@ -59,7 +60,10 @@ class DatabaseService {
             return {
                 containerId: container.id,
                 connectionString,
-                containerName
+                containerName,
+                dbUser,
+                dbPassword: password,
+                dbPort: port
             };
         } catch (error) {
             logger.error(`Failed to create database container: ${error.message}`);

@@ -17,7 +17,13 @@ router.get('/', authenticateToken, async (req, res) => {
             duckdns_root: process.env.DUCKDNS_ROOT_DOMAIN || 'duckdns.org'
         };
         
-        const userInfo = await query('SELECT id, email, is_admin, created_at FROM users WHERE id = $1', [req.user.userId]);
+        const userInfo = await query(`
+            SELECT u.id, u.email, u.is_admin, u.created_at, u.plan_id, p.name as plan_name,
+                   p.max_projects, p.max_databases, p.max_storage_mb, p.can_use_duckdns
+            FROM users u 
+            LEFT JOIN plans p ON u.plan_id = p.id 
+            WHERE u.id = $1
+        `, [req.user.userId]);
         
         res.json({
             stats,
@@ -26,6 +32,17 @@ router.get('/', authenticateToken, async (req, res) => {
     } catch (error) {
         logger.error('Get settings error:', error);
         res.status(500).json({ error: 'Failed to fetch settings' });
+    }
+});
+
+// Plans management (Admin only)
+router.get('/plans', authenticateToken, requireAdmin, async (req, res) => {
+    try {
+        const result = await query('SELECT * FROM plans ORDER BY id ASC');
+        res.json({ plans: result.rows });
+    } catch (error) {
+        logger.error('Fetch plans error:', error);
+        res.status(500).json({ error: 'Failed to fetch plans' });
     }
 });
 
@@ -51,10 +68,43 @@ router.post('/change-password', authenticateToken, async (req, res) => {
     }
 });
 
+router.post('/plans', authenticateToken, requireAdmin, async (req, res) => {
+    try {
+        const { name, max_projects, max_databases, max_storage_mb, can_use_duckdns, can_use_custom_env } = req.body;
+        const result = await query(
+            'INSERT INTO plans (name, max_projects, max_databases, max_storage_mb, can_use_duckdns, can_use_custom_env) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
+            [name, max_projects, max_databases, max_storage_mb, can_use_duckdns, can_use_custom_env]
+        );
+        res.status(201).json({ plan: result.rows[0] });
+    } catch (error) {
+        logger.error('Create plan error:', error);
+        res.status(500).json({ error: 'Failed to create plan' });
+    }
+});
+
+router.put('/plans/:id', authenticateToken, requireAdmin, async (req, res) => {
+    try {
+        const { name, max_projects, max_databases, max_storage_mb, can_use_duckdns, can_use_custom_env } = req.body;
+        const result = await query(
+            'UPDATE plans SET name = $1, max_projects = $2, max_databases = $3, max_storage_mb = $4, can_use_duckdns = $5, can_use_custom_env = $6 WHERE id = $7 RETURNING *',
+            [name, max_projects, max_databases, max_storage_mb, can_use_duckdns, can_use_custom_env, req.params.id]
+        );
+        res.json({ plan: result.rows[0] });
+    } catch (error) {
+        logger.error('Update plan error:', error);
+        res.status(500).json({ error: 'Failed to update plan' });
+    }
+});
+
 // User management (Admin only)
 router.get('/users', authenticateToken, requireAdmin, async (req, res) => {
     try {
-        const result = await query('SELECT id, email, is_admin, created_at FROM users ORDER BY created_at DESC');
+        const result = await query(`
+            SELECT u.id, u.email, u.is_admin, u.created_at, u.plan_id, p.name as plan_name 
+            FROM users u 
+            LEFT JOIN plans p ON u.plan_id = p.id 
+            ORDER BY u.created_at DESC
+        `);
         res.json({ users: result.rows });
     } catch (error) {
         logger.error('Fetch users error:', error);
@@ -64,7 +114,7 @@ router.get('/users', authenticateToken, requireAdmin, async (req, res) => {
 
 router.post('/users', authenticateToken, requireAdmin, async (req, res) => {
     try {
-        const { email, password, isAdmin } = req.body;
+        const { email, password, isAdmin, planId } = req.body;
         
         const existing = await query('SELECT * FROM users WHERE email = $1', [email]);
         if (existing.rows.length > 0) {
@@ -73,14 +123,25 @@ router.post('/users', authenticateToken, requireAdmin, async (req, res) => {
 
         const hashedPassword = await bcrypt.hash(password, 10);
         const result = await query(
-            'INSERT INTO users (email, password, is_admin) VALUES ($1, $2, $3) RETURNING id, email, is_admin',
-            [email, hashedPassword, isAdmin || false]
+            'INSERT INTO users (email, password, is_admin, plan_id) VALUES ($1, $2, $3, $4) RETURNING id, email, is_admin, plan_id',
+            [email, hashedPassword, isAdmin || false, planId]
         );
 
         res.status(201).json({ user: result.rows[0] });
     } catch (error) {
         logger.error('Create user error:', error);
         res.status(500).json({ error: 'Failed to create user' });
+    }
+});
+
+router.put('/users/:id', authenticateToken, requireAdmin, async (req, res) => {
+    try {
+        const { isAdmin, planId } = req.body;
+        await query('UPDATE users SET is_admin = $1, plan_id = $2 WHERE id = $3', [isAdmin, planId, req.params.id]);
+        res.json({ message: 'User updated successfully' });
+    } catch (error) {
+        logger.error('Update user error:', error);
+        res.status(500).json({ error: 'Failed to update user' });
     }
 });
 

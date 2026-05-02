@@ -10,6 +10,7 @@ document.addEventListener('alpine:init', () => {
         databases: [],
         cdnFiles: [],
         allUsers: [],
+        allPlans: [],
         selectedProject: null,
         projectTab: 'logs',
         projectDeployments: [],
@@ -26,11 +27,14 @@ document.addEventListener('alpine:init', () => {
             build_command: '', 
             start_command: '',
             env_vars_raw: '',
-            duckdns_subdomain: ''
+            duckdns_subdomain: '',
+            cpu_limit: '0.5',
+            memory_limit: '512m'
         },
-        dbForm: { name: '', type: 'postgres' },
+        dbForm: { name: '', type: 'postgres', dbUser: '', dbPassword: '', dbPort: null },
         passwordForm: { current: '', new: '', confirm: '' },
-        userForm: { email: '', password: '', isAdmin: false },
+        userForm: { id: null, email: '', password: '', isAdmin: false, planId: 1 },
+        planForm: { id: null, name: '', max_projects: 3, max_databases: 2, max_storage_mb: 500, can_use_duckdns: false, can_use_custom_env: true },
 
         init() {
             this.token = localStorage.getItem('oh_token');
@@ -44,6 +48,7 @@ document.addEventListener('alpine:init', () => {
             this.$watch('view', (value) => {
                 if (value === 'settings') this.fetchSettings();
                 if (value === 'cdn') this.fetchCdnFiles();
+                if (value === 'admin') this.fetchAdminData();
             });
         },
 
@@ -153,12 +158,15 @@ document.addEventListener('alpine:init', () => {
                 });
                 const data = await res.json();
                 this.systemStats = data.stats;
-                if (this.user.isAdmin) {
-                    this.fetchUsers();
-                }
+                this.user = { ...this.user, ...data.user };
+                localStorage.setItem('oh_user', JSON.stringify(this.user));
             } catch (err) {
                 console.error('Failed to fetch settings', err);
             }
+        },
+
+        async fetchAdminData() {
+            await Promise.all([this.fetchUsers(), this.fetchPlans()]);
         },
 
         async fetchUsers() {
@@ -170,6 +178,18 @@ document.addEventListener('alpine:init', () => {
                 this.allUsers = data.users || [];
             } catch (err) {
                 console.error('Failed to fetch users', err);
+            }
+        },
+
+        async fetchPlans() {
+            try {
+                const res = await fetch('/api/settings/plans', {
+                    headers: { 'Authorization': `Bearer ${this.token}` }
+                });
+                const data = await res.json();
+                this.allPlans = data.plans || [];
+            } catch (err) {
+                console.error('Failed to fetch plans', err);
             }
         },
 
@@ -215,11 +235,20 @@ document.addEventListener('alpine:init', () => {
                 this.fetchProjects();
                 this.showToast('Project created and deployment started!', 'success');
                 this.selectProject(data.project);
+                this.resetProjectForm();
             } catch (err) {
                 this.showToast(err.message, 'error');
             } finally {
                 this.loading = false;
             }
+        },
+
+        resetProjectForm() {
+            this.projectForm = { 
+                name: '', subdomain: '', type: 'nodejs', git_url: '', 
+                build_command: '', start_command: '', env_vars_raw: '', 
+                duckdns_subdomain: '', cpu_limit: '0.5', memory_limit: '512m' 
+            };
         },
 
         async redeployProject(project) {
@@ -258,10 +287,26 @@ document.addEventListener('alpine:init', () => {
                 this.showModal = null;
                 this.fetchDatabases();
                 this.showToast('Database provisioned successfully!', 'success');
+                this.dbForm = { name: '', type: 'postgres', dbUser: '', dbPassword: '', dbPort: null };
             } catch (err) {
                 this.showToast(err.message, 'error');
             } finally {
                 this.loading = false;
+            }
+        },
+
+        async deleteDatabase(db) {
+            if (!confirm(`Are you sure you want to delete database ${db.name}?`)) return;
+            try {
+                const res = await fetch(`/api/databases/${db.id}`, {
+                    method: 'DELETE',
+                    headers: { 'Authorization': `Bearer ${this.token}` }
+                });
+                if (!res.ok) throw new Error('Failed to delete database');
+                this.fetchDatabases();
+                this.showToast('Database deleted', 'success');
+            } catch (err) {
+                this.showToast(err.message, 'error');
             }
         },
 
@@ -291,11 +336,24 @@ document.addEventListener('alpine:init', () => {
             }
         },
 
-        async createUser() {
+        editUser(user) {
+            this.userForm = { 
+                id: user.id, 
+                email: user.email, 
+                isAdmin: user.is_admin, 
+                planId: user.plan_id || 1 
+            };
+            this.showModal = 'edit-user';
+        },
+
+        async saveUser() {
             this.loading = true;
             try {
-                const res = await fetch('/api/settings/users', {
-                    method: 'POST',
+                const method = this.showModal === 'create-user' ? 'POST' : 'PUT';
+                const url = this.showModal === 'create-user' ? '/api/settings/users' : `/api/settings/users/${this.userForm.id}`;
+                
+                const res = await fetch(url, {
+                    method,
                     headers: { 
                         'Content-Type': 'application/json',
                         'Authorization': `Bearer ${this.token}`
@@ -305,10 +363,41 @@ document.addEventListener('alpine:init', () => {
                 const data = await res.json();
                 if (data.error) throw new Error(data.error);
 
-                this.showToast('User created successfully', 'success');
+                this.showToast(this.showModal === 'create-user' ? 'User created' : 'User updated', 'success');
                 this.showModal = null;
                 this.fetchUsers();
-                this.userForm = { email: '', password: '', isAdmin: false };
+            } catch (err) {
+                this.showToast(err.message, 'error');
+            } finally {
+                this.loading = false;
+            }
+        },
+
+        editPlan(plan) {
+            this.planForm = { ...plan };
+            this.showModal = 'edit-plan';
+        },
+
+        async savePlan() {
+            this.loading = true;
+            try {
+                const method = this.showModal === 'create-plan' ? 'POST' : 'PUT';
+                const url = this.showModal === 'create-plan' ? '/api/settings/plans' : `/api/settings/plans/${this.planForm.id}`;
+                
+                const res = await fetch(url, {
+                    method,
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${this.token}`
+                    },
+                    body: JSON.stringify(this.planForm)
+                });
+                const data = await res.json();
+                if (data.error) throw new Error(data.error);
+
+                this.showToast(this.showModal === 'create-plan' ? 'Plan created' : 'Plan updated', 'success');
+                this.showModal = null;
+                this.fetchPlans();
             } catch (err) {
                 this.showToast(err.message, 'error');
             } finally {
@@ -371,6 +460,11 @@ document.addEventListener('alpine:init', () => {
             } catch (err) {
                 this.showToast(err.message, 'error');
             }
+        },
+
+        calculateCdnStorage() {
+            const totalBytes = this.cdnFiles.reduce((acc, file) => acc + (file.size || 0), 0);
+            return (totalBytes / (1024 * 1024)).toFixed(1);
         },
 
         async deleteProject(project) {

@@ -62,6 +62,7 @@
                             <button @click="view = 'projects'" :class="view === 'projects' ? 'border-black text-black' : 'border-transparent text-gray-500 hover:text-black'" class="px-3 py-5 border-b-2 text-sm font-medium transition-all">Projects</button>
                             <button @click="view = 'databases'" :class="view === 'databases' ? 'border-black text-black' : 'border-transparent text-gray-500 hover:text-black'" class="px-3 py-5 border-b-2 text-sm font-medium transition-all">Databases</button>
                             <button @click="view = 'cdn'" :class="view === 'cdn' ? 'border-black text-black' : 'border-transparent text-gray-500 hover:text-black'" class="px-3 py-5 border-b-2 text-sm font-medium transition-all">CDN / Storage</button>
+                            <button @click="view = 'admin'" x-show="user.isAdmin" :class="view === 'admin' ? 'border-black text-black' : 'border-transparent text-gray-500 hover:text-black'" class="px-3 py-5 border-b-2 text-sm font-medium transition-all text-purple-600">Admin</button>
                             <button @click="view = 'settings'" :class="view === 'settings' ? 'border-black text-black' : 'border-transparent text-gray-500 hover:text-black'" class="px-3 py-5 border-b-2 text-sm font-medium transition-all">Settings</button>
                         </div>
                     </div>
@@ -83,8 +84,9 @@
                     <div>
                         <h2 class="text-2xl font-bold">Projects</h2>
                         <p class="text-gray-500">Manage your deployments and applications</p>
+                        <p class="text-[10px] text-gray-400 mt-1 uppercase font-bold tracking-widest" x-text="'Usage: ' + projects.length + ' / ' + (user.max_projects || 0) + ' projects'"></p>
                     </div>
-                    <button @click="showModal = 'create-project'" class="bg-black text-white px-6 py-2 rounded-lg font-medium hover:bg-gray-800 transition-colors shadow-sm flex items-center gap-2">
+                    <button @click="showModal = 'create-project'" :disabled="projects.length >= (user.max_projects || 0)" class="bg-black text-white px-6 py-2 rounded-lg font-medium hover:bg-gray-800 transition-colors shadow-sm flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
                         <i class="fas fa-plus"></i> New Project
                     </button>
                 </div>
@@ -122,8 +124,9 @@
                     <div>
                         <h2 class="text-2xl font-bold">Databases</h2>
                         <p class="text-gray-500">Manage your data stores and connection strings</p>
+                        <p class="text-[10px] text-gray-400 mt-1 uppercase font-bold tracking-widest" x-text="'Usage: ' + databases.length + ' / ' + (user.max_databases || 0) + ' databases'"></p>
                     </div>
-                    <button @click="showModal = 'create-db'" class="bg-black text-white px-6 py-2 rounded-lg font-medium hover:bg-gray-800 transition-colors shadow-sm flex items-center gap-2">
+                    <button @click="showModal = 'create-db'" :disabled="databases.length >= (user.max_databases || 0)" class="bg-black text-white px-6 py-2 rounded-lg font-medium hover:bg-gray-800 transition-colors shadow-sm flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
                         <i class="fas fa-database"></i> New Database
                     </button>
                 </div>
@@ -138,10 +141,15 @@
                             </div>
                             <h3 class="font-bold text-lg mb-1" x-text="db.name"></h3>
                             <p class="text-sm text-gray-500 mb-4 uppercase font-semibold tracking-tighter" x-text="db.type"></p>
-                            <div class="relative group">
+                            <div class="relative group mb-4">
                                 <code class="block w-full p-2 bg-gray-50 rounded text-xs text-gray-600 truncate font-mono" x-text="db.connection_string"></code>
                                 <button @click="copy(db.connection_string)" class="absolute right-2 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 p-1 bg-white border border-gray-200 rounded hover:bg-gray-50 transition-all shadow-sm">
                                     <i class="far fa-copy"></i>
+                                </button>
+                            </div>
+                            <div class="flex justify-end">
+                                <button @click="deleteDatabase(db)" class="text-xs text-red-400 hover:text-red-600 font-bold uppercase tracking-wider transition-colors">
+                                    <i class="fas fa-trash-alt mr-1"></i> Delete
                                 </button>
                             </div>
                         </div>
@@ -220,9 +228,45 @@
                                     <label class="block text-sm font-medium text-gray-700 mb-1">Email Address</label>
                                     <input type="text" :value="user.email" disabled class="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-lg text-gray-500 cursor-not-allowed">
                                 </div>
-                                <div>
-                                    <label class="block text-sm font-medium text-gray-700 mb-1">Role</label>
-                                    <span :class="user.isAdmin ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-700'" class="px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider" x-text="user.isAdmin ? 'Administrator' : 'User'"></span>
+                                <div class="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-1">Plan</label>
+                                        <span class="bg-blue-100 text-blue-700 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider" x-text="user.plan_name || 'Free'"></span>
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-1">Role</label>
+                                        <span :class="user.isAdmin ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-700'" class="px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider" x-text="user.isAdmin ? 'Administrator' : 'User'"></span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Quotas Section -->
+                        <div class="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+                            <h3 class="text-lg font-bold mb-4 flex items-center gap-2">
+                                <i class="fas fa-chart-pie"></i> Usage & Quotas
+                            </h3>
+                            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                                <div class="p-4 bg-gray-50 rounded-lg">
+                                    <div class="text-xs font-bold text-gray-400 uppercase mb-1">Projects</div>
+                                    <div class="text-2xl font-bold" x-text="projects.length + ' / ' + (user.max_projects || 0)"></div>
+                                    <div class="w-full bg-gray-200 h-1.5 rounded-full mt-2">
+                                        <div class="bg-black h-1.5 rounded-full" :style="'width: ' + Math.min((projects.length / (user.max_projects || 1)) * 100, 100) + '%'"></div>
+                                    </div>
+                                </div>
+                                <div class="p-4 bg-gray-50 rounded-lg">
+                                    <div class="text-xs font-bold text-gray-400 uppercase mb-1">Databases</div>
+                                    <div class="text-2xl font-bold" x-text="databases.length + ' / ' + (user.max_databases || 0)"></div>
+                                    <div class="w-full bg-gray-200 h-1.5 rounded-full mt-2">
+                                        <div class="bg-blue-600 h-1.5 rounded-full" :style="'width: ' + Math.min((databases.length / (user.max_databases || 1)) * 100, 100) + '%'"></div>
+                                    </div>
+                                </div>
+                                <div class="p-4 bg-gray-50 rounded-lg">
+                                    <div class="text-xs font-bold text-gray-400 uppercase mb-1">Storage (MB)</div>
+                                    <div class="text-2xl font-bold" x-text="calculateCdnStorage() + ' / ' + (user.max_storage_mb || 0)"></div>
+                                    <div class="w-full bg-gray-200 h-1.5 rounded-full mt-2">
+                                        <div class="bg-green-600 h-1.5 rounded-full" :style="'width: ' + Math.min((calculateCdnStorage() / (user.max_storage_mb || 1)) * 100, 100) + '%'"></div>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -249,40 +293,6 @@
                                 </div>
                                 <button type="submit" class="bg-black text-white px-6 py-2 rounded-lg font-medium hover:bg-gray-800 transition-colors">Update Password</button>
                             </form>
-                        </div>
-
-                        <!-- User Management (Admin Only) -->
-                        <div x-show="user.isAdmin" class="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
-                            <div class="flex justify-between items-center mb-4">
-                                <h3 class="text-lg font-bold flex items-center gap-2">
-                                    <i class="fas fa-users"></i> User Management
-                                </h3>
-                                <button @click="showModal = 'create-user'" class="text-sm bg-black text-white px-3 py-1 rounded-lg hover:bg-gray-800">Add User</button>
-                            </div>
-                            <div class="overflow-hidden border border-gray-100 rounded-lg">
-                                <table class="min-w-full divide-y divide-gray-200">
-                                    <thead class="bg-gray-50">
-                                        <tr>
-                                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">User</th>
-                                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Role</th>
-                                            <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody class="bg-white divide-y divide-gray-200">
-                                        <template x-for="u in allUsers" :key="u.id">
-                                            <tr>
-                                                <td class="px-4 py-3 whitespace-nowrap text-sm" x-text="u.email"></td>
-                                                <td class="px-4 py-3 whitespace-nowrap text-sm">
-                                                    <span :class="u.is_admin ? 'text-purple-600 font-bold' : 'text-gray-500'" x-text="u.is_admin ? 'Admin' : 'User'"></span>
-                                                </td>
-                                                <td class="px-4 py-3 whitespace-nowrap text-right text-sm">
-                                                    <button @click="deleteUser(u)" x-show="u.id !== user.id" class="text-red-500 hover:text-red-700"><i class="fas fa-trash"></i></button>
-                                                </td>
-                                            </tr>
-                                        </template>
-                                    </tbody>
-                                </table>
-                            </div>
                         </div>
                     </div>
 
@@ -312,6 +322,86 @@
                                     <span class="font-bold text-blue-600" x-text="systemStats?.duckdns_root"></span>
                                 </div>
                             </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Admin View -->
+            <div x-show="view === 'admin'" class="space-y-8">
+                <div class="flex justify-between items-center">
+                    <div>
+                        <h2 class="text-2xl font-bold">Administration</h2>
+                        <p class="text-gray-500">Manage users, pricing plans, and platform-wide settings</p>
+                    </div>
+                    <div class="flex gap-2">
+                        <button @click="showModal = 'create-user'" class="bg-black text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-800 transition-colors flex items-center gap-2">
+                            <i class="fas fa-user-plus"></i> Add User
+                        </button>
+                        <button @click="showModal = 'create-plan'" class="bg-purple-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-purple-700 transition-colors flex items-center gap-2">
+                            <i class="fas fa-gem"></i> Create Plan
+                        </button>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                    <!-- User Management -->
+                    <div class="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+                        <h3 class="text-lg font-bold mb-4 flex items-center gap-2">
+                            <i class="fas fa-users text-gray-400"></i> User Directory
+                        </h3>
+                        <div class="overflow-hidden border border-gray-100 rounded-lg">
+                            <table class="min-w-full divide-y divide-gray-200">
+                                <thead class="bg-gray-50">
+                                    <tr>
+                                        <th class="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase">User</th>
+                                        <th class="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase">Plan</th>
+                                        <th class="px-4 py-3 text-right text-xs font-bold text-gray-500 uppercase">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="bg-white divide-y divide-gray-200">
+                                    <template x-for="u in allUsers" :key="u.id">
+                                        <tr class="hover:bg-gray-50 transition-colors">
+                                            <td class="px-4 py-4 whitespace-nowrap">
+                                                <div class="text-sm font-medium text-gray-900" x-text="u.email"></div>
+                                                <div class="text-xs text-gray-500" x-text="u.is_admin ? 'Platform Admin' : 'Standard User'"></div>
+                                            </td>
+                                            <td class="px-4 py-4 whitespace-nowrap">
+                                                <span class="px-2 py-1 text-xs font-bold bg-blue-50 text-blue-600 rounded" x-text="u.plan_name || 'Free'"></span>
+                                            </td>
+                                            <td class="px-4 py-4 whitespace-nowrap text-right text-sm">
+                                                <button @click="editUser(u)" class="text-gray-400 hover:text-black mx-2"><i class="fas fa-edit"></i></button>
+                                                <button @click="deleteUser(u)" x-show="u.id !== user.id" class="text-red-400 hover:text-red-600"><i class="fas fa-trash"></i></button>
+                                            </td>
+                                        </tr>
+                                    </template>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Plans Management -->
+                    <div class="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+                        <h3 class="text-lg font-bold mb-4 flex items-center gap-2">
+                            <i class="fas fa-tags text-gray-400"></i> Pricing Plans / Tiers
+                        </h3>
+                        <div class="space-y-4">
+                            <template x-for="p in allPlans" :key="p.id">
+                                <div class="flex items-center justify-between p-4 border border-gray-100 rounded-xl hover:border-purple-200 hover:bg-purple-50 transition-all">
+                                    <div>
+                                        <div class="text-sm font-bold text-gray-900" x-text="p.name"></div>
+                                        <div class="text-xs text-gray-500 mt-1">
+                                            <span x-text="p.max_projects + ' Projects'"></span> • 
+                                            <span x-text="p.max_databases + ' DBs'"></span> • 
+                                            <span x-text="formatSize(p.max_storage_mb * 1024 * 1024) + ' Storage'"></span>
+                                        </div>
+                                    </div>
+                                    <div class="flex items-center gap-2">
+                                        <span x-show="p.can_use_duckdns" class="bg-green-100 text-green-700 px-2 py-0.5 rounded text-[10px] font-bold uppercase">DuckDNS</span>
+                                        <button @click="editPlan(p)" class="text-gray-400 hover:text-purple-600 p-2"><i class="fas fa-cog"></i></button>
+                                    </div>
+                                </div>
+                            </template>
                         </div>
                     </div>
                 </div>
@@ -380,12 +470,35 @@
                         <div>
                             <label class="block text-xs font-semibold text-blue-500 mb-1">DuckDNS Subdomain</label>
                             <div class="flex">
-                                <input x-model="projectForm.duckdns_subdomain" type="text" class="flex-grow px-3 py-1.5 text-sm border border-blue-200 rounded-l bg-white" placeholder="my-custom-sub">
+                                <input x-model="projectForm.duckdns_subdomain" :disabled="!user.can_use_duckdns" type="text" class="flex-grow px-3 py-1.5 text-sm border border-blue-200 rounded-l bg-white disabled:bg-gray-100 disabled:cursor-not-allowed" placeholder="my-custom-sub">
                                 <span class="bg-blue-100 px-2 py-1.5 text-xs text-blue-600 border border-l-0 border-blue-200 rounded-r" x-text="'.' + (systemStats?.duckdns_root || 'duckdns.org')"></span>
                             </div>
+                            <p x-show="!user.can_use_duckdns" class="text-[10px] text-red-500 mt-1">Upgrade your plan to use DuckDNS.</p>
                         </div>
-                        <div class="flex items-end">
-                            <p class="text-[10px] text-blue-600">If provided, this project will be accessible via DuckDNS. Make sure your DuckDNS token is set in the server environment.</p>
+                    </div>
+                </div>
+                <div class="p-4 bg-purple-50 rounded-xl space-y-4">
+                    <h4 class="text-sm font-bold text-purple-700 flex items-center gap-2"><i class="fas fa-microchip"></i> Resource Limits</h4>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-xs font-semibold text-purple-500 mb-1">CPU Limit (Cores)</label>
+                            <select x-model="projectForm.cpu_limit" class="w-full px-3 py-1.5 text-sm border border-purple-200 rounded bg-white">
+                                <option value="0.1">0.1 Cores</option>
+                                <option value="0.25">0.25 Cores</option>
+                                <option value="0.5">0.5 Cores (Default)</option>
+                                <option value="1.0">1.0 Cores</option>
+                                <option value="2.0">2.0 Cores</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-purple-500 mb-1">Memory Limit</label>
+                            <select x-model="projectForm.memory_limit" class="w-full px-3 py-1.5 text-sm border border-purple-200 rounded bg-white">
+                                <option value="128m">128 MB</option>
+                                <option value="256m">256 MB</option>
+                                <option value="512m">512 MB (Default)</option>
+                                <option value="1024m">1024 MB</option>
+                                <option value="2048m">2048 MB</option>
+                            </select>
                         </div>
                     </div>
                 </div>
@@ -415,6 +528,23 @@
                         <option value="redis">Redis 7</option>
                         <option value="mongodb">MongoDB 6</option>
                     </select>
+                </div>
+                <div class="p-4 bg-gray-50 rounded-xl space-y-4">
+                    <h4 class="text-xs font-bold text-gray-400 uppercase tracking-widest flex items-center gap-2"><i class="fas fa-lock"></i> Custom Credentials (Optional)</h4>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-[10px] font-bold text-gray-500 mb-1">Username</label>
+                            <input x-model="dbForm.dbUser" type="text" class="w-full px-3 py-1.5 text-sm border border-gray-200 rounded bg-white" placeholder="openhost">
+                        </div>
+                        <div>
+                            <label class="block text-[10px] font-bold text-gray-500 mb-1">Password</label>
+                            <input x-model="dbForm.dbPassword" type="password" class="w-full px-3 py-1.5 text-sm border border-gray-200 rounded bg-white" placeholder="••••••••">
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-[10px] font-bold text-gray-500 mb-1">Custom Port</label>
+                        <input x-model="dbForm.dbPort" type="number" class="w-full px-3 py-1.5 text-sm border border-gray-200 rounded bg-white" placeholder="Default">
+                    </div>
                 </div>
                 <div class="flex justify-end gap-3 pt-4">
                     <button type="button" @click="showModal = null" class="px-4 py-2 text-gray-600">Cancel</button>
@@ -538,20 +668,28 @@
         </div>
     </div>
 
-    <!-- Create User Modal -->
-    <div x-show="showModal === 'create-user'" x-cloak class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900 bg-opacity-50 backdrop-blur-sm">
+    <!-- Create/Edit User Modal -->
+    <div x-show="showModal === 'create-user' || showModal === 'edit-user'" x-cloak class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900 bg-opacity-50 backdrop-blur-sm">
         <div class="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden" @click.away="showModal = null">
             <div class="p-6 border-b border-gray-100">
-                <h3 class="text-xl font-bold text-gray-900">Create New User</h3>
+                <h3 class="text-xl font-bold text-gray-900" x-text="showModal === 'create-user' ? 'Create New User' : 'Edit User'"></h3>
             </div>
-            <form @submit.prevent="createUser" class="p-6 space-y-4">
-                <div>
+            <form @submit.prevent="saveUser" class="p-6 space-y-4">
+                <div x-show="showModal === 'create-user'">
                     <label class="block text-sm font-medium text-gray-700 mb-1">Email Address</label>
                     <input x-model="userForm.email" required type="email" class="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-black outline-none" placeholder="user@example.com">
                 </div>
-                <div>
+                <div x-show="showModal === 'create-user'">
                     <label class="block text-sm font-medium text-gray-700 mb-1">Password</label>
                     <input x-model="userForm.password" required type="password" class="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-black outline-none" placeholder="••••••••">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Pricing Plan</label>
+                    <select x-model="userForm.planId" class="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-black bg-white">
+                        <template x-for="p in allPlans" :key="p.id">
+                            <option :value="p.id" x-text="p.name"></option>
+                        </template>
+                    </select>
                 </div>
                 <div class="flex items-center gap-2">
                     <input type="checkbox" x-model="userForm.isAdmin" id="is-admin-check" class="rounded text-black focus:ring-black">
@@ -559,7 +697,52 @@
                 </div>
                 <div class="flex justify-end gap-3 pt-4">
                     <button type="button" @click="showModal = null" class="px-4 py-2 text-gray-600">Cancel</button>
-                    <button type="submit" :disabled="loading" class="bg-black text-white px-6 py-2 rounded-lg font-bold disabled:opacity-50 text-sm">Create User</button>
+                    <button type="submit" :disabled="loading" class="bg-black text-white px-6 py-2 rounded-lg font-bold disabled:opacity-50 text-sm" x-text="showModal === 'create-user' ? 'Create User' : 'Update User'"></button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Create/Edit Plan Modal -->
+    <div x-show="showModal === 'create-plan' || showModal === 'edit-plan'" x-cloak class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900 bg-opacity-50 backdrop-blur-sm">
+        <div class="bg-white w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden" @click.away="showModal = null">
+            <div class="p-6 border-b border-gray-100">
+                <h3 class="text-xl font-bold text-gray-900" x-text="showModal === 'create-plan' ? 'Create Pricing Plan' : 'Edit Plan'"></h3>
+            </div>
+            <form @submit.prevent="savePlan" class="p-6 space-y-6">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Plan Name</label>
+                    <input x-model="planForm.name" required type="text" class="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-black outline-none" placeholder="Pro, Business, etc.">
+                </div>
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Max Projects</label>
+                        <input x-model="planForm.max_projects" required type="number" class="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-black outline-none">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Max Databases</label>
+                        <input x-model="planForm.max_databases" required type="number" class="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-black outline-none">
+                    </div>
+                </div>
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Storage (MB)</label>
+                        <input x-model="planForm.max_storage_mb" required type="number" class="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-black outline-none">
+                    </div>
+                    <div class="flex flex-col justify-center gap-2">
+                        <div class="flex items-center gap-2">
+                            <input type="checkbox" x-model="planForm.can_use_duckdns" id="can-duck-check" class="rounded text-black focus:ring-black">
+                            <label for="can-duck-check" class="text-sm font-medium text-gray-700">Can use DuckDNS</label>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <input type="checkbox" x-model="planForm.can_use_custom_env" id="can-env-check" class="rounded text-black focus:ring-black">
+                            <label for="can-env-check" class="text-sm font-medium text-gray-700">Can use Custom Env</label>
+                        </div>
+                    </div>
+                </div>
+                <div class="flex justify-end gap-3 pt-4 border-t border-gray-100">
+                    <button type="button" @click="showModal = null" class="px-6 py-2 text-gray-600 font-medium hover:bg-gray-50 rounded-lg transition-all">Cancel</button>
+                    <button type="submit" :disabled="loading" class="bg-black text-white px-8 py-2 rounded-lg font-bold hover:bg-gray-800 transition-all shadow-md disabled:opacity-50" x-text="showModal === 'create-plan' ? 'Create Plan' : 'Update Plan'"></button>
                 </div>
             </form>
         </div>

@@ -164,7 +164,9 @@ class DeploymentService {
             HostConfig: {
                 Binds: [`${deployDir}:/app`],
                 NetworkMode: 'openhost-network',
-                RestartPolicy: { Name: 'unless-stopped' }
+                RestartPolicy: { Name: 'unless-stopped' },
+                NanoCpus: parseFloat(project.cpu_limit || '0.5') * 1e9,
+                Memory: this.parseMemory(project.memory_limit || '512m')
             }
         };
 
@@ -248,6 +250,16 @@ server {
             'nextjs': 3000
         };
         return ports[projectType] || 3000;
+    }
+
+    parseMemory(mem) {
+        if (!mem) return 512 * 1024 * 1024;
+        const units = { 'k': 1024, 'm': 1024 * 1024, 'g': 1024 * 1024 * 1024 };
+        const match = mem.toLowerCase().match(/^(\d+)([kmg]?)$/);
+        if (!match) return 512 * 1024 * 1024;
+        const val = parseInt(match[1]);
+        const unit = match[2];
+        return val * (units[unit] || 1);
     }
 
     async reloadNginx() {
