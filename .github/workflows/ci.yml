@@ -25,8 +25,11 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Build Docker image
-        run: docker build . --file Dockerfile --tag openhost:latest
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
       - name: Login to GitHub Container Registry
         if: github.event_name != 'pull_request'
@@ -38,10 +41,11 @@ jobs:
 
       - name: Build and push Docker image
         if: github.event_name != 'pull_request'
-        uses: docker/build-push-action@v4
+        uses: docker/build-push-action@v5
         with:
           context: .
           push: true
+          platforms: linux/amd64,linux/arm64
           tags: |
             ghcr.io/stuffzez/openhost:latest
             ghcr.io/stuffzez/openhost:${{ github.sha }}
