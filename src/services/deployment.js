@@ -205,7 +205,13 @@ class DeploymentService {
             `${project.subdomain}.localhost`,
             `${project.subdomain}.*`
         ];
-        if (project.duckdns_subdomain) {
+        
+        const rootDomain = process.env.DUCKDNS_ROOT_DOMAIN;
+        if (project.duckdns_subdomain && rootDomain) {
+            // hello.world.duckdns.org
+            domains.push(`${project.duckdns_subdomain}.${rootDomain}`);
+        } else if (project.duckdns_subdomain) {
+            // Fallback to legacy behavior if no root domain is set
             domains.push(`${project.duckdns_subdomain}.duckdns.org`);
         }
 
@@ -253,17 +259,26 @@ server {
         }
     }
 
-    async updateDuckDNS(subdomain, io) {
+    async updateDuckDNS(projectSubdomain, io) {
         const token = process.env.DUCKDNS_TOKEN;
+        const rootDomain = process.env.DUCKDNS_ROOT_DOMAIN;
+        
         if (!token) {
             io.emit('build-log', { message: 'Warning: DUCKDNS_TOKEN not set, skipping DuckDNS update', type: 'error' });
             return;
         }
 
-        io.emit('build-log', { message: `Updating DuckDNS for ${subdomain}...`, type: 'info' });
+        // If rootDomain is world.duckdns.org, we update 'world'
+        // If no rootDomain, we update projectSubdomain
+        let domainToUpdate = projectSubdomain;
+        if (rootDomain) {
+            domainToUpdate = rootDomain.split('.')[0];
+        }
+
+        io.emit('build-log', { message: `Updating DuckDNS for ${domainToUpdate}.duckdns.org...`, type: 'info' });
         
         return new Promise((resolve, reject) => {
-            https.get(`https://www.duckdns.org/update?domains=${subdomain}&token=${token}&ip=`, (res) => {
+            https.get(`https://www.duckdns.org/update?domains=${domainToUpdate}&token=${token}&ip=`, (res) => {
                 let data = '';
                 res.on('data', (chunk) => data += chunk);
                 res.on('end', () => {

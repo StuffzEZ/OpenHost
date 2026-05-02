@@ -13,7 +13,8 @@ router.get('/', authenticateToken, async (req, res) => {
             version: '1.0.0',
             node_version: process.version,
             platform: process.platform,
-            uptime: process.uptime()
+            uptime: process.uptime(),
+            duckdns_root: process.env.DUCKDNS_ROOT_DOMAIN || 'duckdns.org'
         };
         
         const userInfo = await query('SELECT id, email, is_admin, created_at FROM users WHERE id = $1', [req.user.userId]);

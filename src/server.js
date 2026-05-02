@@ -35,7 +35,8 @@ app.set('io', io);
 app.use(helmet({
     contentSecurityPolicy: false,
     crossOriginEmbedderPolicy: false,
-    crossOriginOpenerPolicy: false
+    crossOriginOpenerPolicy: false,
+    originAgentCluster: false
 }));
 app.use(cors());
 

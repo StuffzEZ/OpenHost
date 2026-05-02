@@ -103,7 +103,11 @@ document.addEventListener('alpine:init', () => {
         },
 
         async fetchData() {
-            await Promise.all([this.fetchProjects(), this.fetchDatabases()]);
+            await Promise.all([
+                this.fetchProjects(), 
+                this.fetchDatabases(),
+                this.fetchSettings()
+            ]);
         },
 
         async fetchProjects() {

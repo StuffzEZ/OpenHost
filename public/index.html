@@ -307,6 +307,10 @@
                                     <span class="text-gray-500">Uptime</span>
                                     <span x-text="formatUptime(systemStats?.uptime)"></span>
                                 </div>
+                                <div class="flex justify-between text-sm">
+                                    <span class="text-gray-500">DuckDNS Root</span>
+                                    <span class="font-bold text-blue-600" x-text="systemStats?.duckdns_root"></span>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -377,7 +381,7 @@
                             <label class="block text-xs font-semibold text-blue-500 mb-1">DuckDNS Subdomain</label>
                             <div class="flex">
                                 <input x-model="projectForm.duckdns_subdomain" type="text" class="flex-grow px-3 py-1.5 text-sm border border-blue-200 rounded-l bg-white" placeholder="my-custom-sub">
-                                <span class="bg-blue-100 px-2 py-1.5 text-xs text-blue-600 border border-l-0 border-blue-200 rounded-r">.duckdns.org</span>
+                                <span class="bg-blue-100 px-2 py-1.5 text-xs text-blue-600 border border-l-0 border-blue-200 rounded-r" x-text="'.' + (systemStats?.duckdns_root || 'duckdns.org')"></span>
                             </div>
                         </div>
                         <div class="flex items-end">
@@ -451,7 +455,7 @@
             <div class="flex-grow overflow-y-auto">
                 <!-- Logs Tab -->
                 <div x-show="projectTab === 'logs'" class="h-full bg-black p-6 font-mono text-sm" id="log-container">
-                    <template x-for="log in buildLogs" :key="log.timestamp">
+                    <template x-for="(log, index) in buildLogs" :key="index">
                         <div class="mb-1">
                             <span class="text-gray-500" x-text="new Date(log.timestamp).toLocaleTimeString()"></span>
                             <span :class="log.type === 'error' ? 'text-red-400' : (log.type === 'success' ? 'text-green-400' : 'text-blue-400')" class="mx-2" x-text="'[' + log.type.toUpperCase() + ']'"></span>
@@ -499,7 +503,7 @@
                             <i class="fas fa-globe text-blue-500"></i>
                             <div class="text-sm">
                                 <span class="text-gray-500">Custom Domain:</span>
-                                <a :href="'http://' + selectedProject?.duckdns_subdomain + '.duckdns.org'" target="_blank" class="font-bold text-blue-700 hover:underline" x-text="selectedProject?.duckdns_subdomain + '.duckdns.org'"></a>
+                                <a :href="'http://' + selectedProject?.duckdns_subdomain + '.' + (systemStats?.duckdns_root || 'duckdns.org')" target="_blank" class="font-bold text-blue-700 hover:underline" x-text="selectedProject?.duckdns_subdomain + '.' + (systemStats?.duckdns_root || 'duckdns.org')"></a>
                             </div>
                         </div>
                     </div>

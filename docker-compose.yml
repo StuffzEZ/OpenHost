@@ -24,6 +24,8 @@ services:
       - JWT_SECRET=change-this-secret-key
       - ADMIN_EMAIL=admin@openhost.local
       - ADMIN_PASSWORD=admin123
+      - DUCKDNS_TOKEN=${DUCKDNS_TOKEN:-}
+      - DUCKDNS_ROOT_DOMAIN=${DUCKDNS_ROOT_DOMAIN:-}
     depends_on:
       - postgres
       - redis
@@ -59,4 +61,5 @@ volumes:
 
 networks:
   openhost-network:
+    name: openhost-network
     driver: bridge
