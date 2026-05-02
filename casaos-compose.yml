@@ -23,6 +23,8 @@ services:
       - JWT_SECRET=change-this-secret-key
       - ADMIN_EMAIL=admin@openhost.local
       - ADMIN_PASSWORD=admin123
+      - DUCKDNS_TOKEN=TOKEN...
+      - DUCKDNS_ROOT_DOMAIN=HELLO.DUCKDNS.ORG
     depends_on:
       - postgres
       - redis

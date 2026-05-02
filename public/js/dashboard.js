@@ -38,10 +38,18 @@ document.addEventListener('alpine:init', () => {
 
         init() {
             this.token = localStorage.getItem('oh_token');
-            if (this.token) {
+            const savedUser = localStorage.getItem('oh_user');
+            
+            if (this.token && savedUser && savedUser !== 'null') {
                 this.isLoggedIn = true;
-                this.user = JSON.parse(localStorage.getItem('oh_user'));
+                try {
+                    this.user = JSON.parse(savedUser);
+                } catch (e) {
+                    this.logout();
+                }
                 this.fetchData();
+            } else {
+                this.logout();
             }
             this.initSocket();
 
@@ -50,6 +58,32 @@ document.addEventListener('alpine:init', () => {
                 if (value === 'cdn') this.fetchCdnFiles();
                 if (value === 'admin') this.fetchAdminData();
             });
+        },
+
+        // Custom fetch wrapper to handle 401/403 errors
+        async apiFetch(url, options = {}) {
+            if (!options.headers) options.headers = {};
+            if (this.token) {
+                options.headers['Authorization'] = `Bearer ${this.token}`;
+            }
+
+            try {
+                const res = await fetch(url, options);
+                
+                if (res.status === 401 || res.status === 403) {
+                    // Only logout if we're not on the login call itself
+                    if (!url.includes('/api/auth/login')) {
+                        this.logout();
+                        this.showToast('Session expired. Please log in again.', 'error');
+                        throw new Error('Unauthorized');
+                    }
+                }
+                
+                return res;
+            } catch (err) {
+                console.error(`API Fetch Error (${url}):`, err);
+                throw err;
+            }
         },
 
         initSocket() {
@@ -105,21 +139,25 @@ document.addEventListener('alpine:init', () => {
             this.isLoggedIn = false;
             this.token = null;
             this.user = null;
+            this.view = 'projects';
         },
 
         async fetchData() {
-            await Promise.all([
-                this.fetchProjects(), 
-                this.fetchDatabases(),
-                this.fetchSettings()
-            ]);
+            if (!this.isLoggedIn) return;
+            try {
+                await Promise.all([
+                    this.fetchProjects(), 
+                    this.fetchDatabases(),
+                    this.fetchSettings()
+                ]);
+            } catch (e) {
+                console.error('Initial data fetch failed', e);
+            }
         },
 
         async fetchProjects() {
             try {
-                const res = await fetch('/api/projects', {
-                    headers: { 'Authorization': `Bearer ${this.token}` }
-                });
+                const res = await this.apiFetch('/api/projects');
                 const data = await res.json();
                 this.projects = data.projects || [];
             } catch (err) {
@@ -129,9 +167,7 @@ document.addEventListener('alpine:init', () => {
 
         async fetchDatabases() {
             try {
-                const res = await fetch('/api/databases', {
-                    headers: { 'Authorization': `Bearer ${this.token}` }
-                });
+                const res = await this.apiFetch('/api/databases');
                 const data = await res.json();
                 this.databases = data.databases || [];
             } catch (err) {
@@ -141,9 +177,7 @@ document.addEventListener('alpine:init', () => {
 
         async fetchCdnFiles() {
             try {
-                const res = await fetch('/api/cdn', {
-                    headers: { 'Authorization': `Bearer ${this.token}` }
-                });
+                const res = await this.apiFetch('/api/cdn');
                 const data = await res.json();
                 this.cdnFiles = data.files || [];
             } catch (err) {
@@ -153,9 +187,7 @@ document.addEventListener('alpine:init', () => {
 
         async fetchSettings() {
             try {
-                const res = await fetch('/api/settings', {
-                    headers: { 'Authorization': `Bearer ${this.token}` }
-                });
+                const res = await this.apiFetch('/api/settings');
                 const data = await res.json();
                 this.systemStats = data.stats;
                 this.user = { ...this.user, ...data.user };
@@ -171,9 +203,7 @@ document.addEventListener('alpine:init', () => {
 
         async fetchUsers() {
             try {
-                const res = await fetch('/api/settings/users', {
-                    headers: { 'Authorization': `Bearer ${this.token}` }
-                });
+                const res = await this.apiFetch('/api/settings/users');
                 const data = await res.json();
                 this.allUsers = data.users || [];
             } catch (err) {
@@ -183,9 +213,7 @@ document.addEventListener('alpine:init', () => {
 
         async fetchPlans() {
             try {
-                const res = await fetch('/api/settings/plans', {
-                    headers: { 'Authorization': `Bearer ${this.token}` }
-                });
+                const res = await this.apiFetch('/api/settings/plans');
                 const data = await res.json();
                 this.allPlans = data.plans || [];
             } catch (err) {
@@ -210,24 +238,18 @@ document.addEventListener('alpine:init', () => {
                 const payload = { ...this.projectForm, env_vars };
                 delete payload.env_vars_raw;
 
-                const res = await fetch('/api/projects', {
+                const res = await this.apiFetch('/api/projects', {
                     method: 'POST',
-                    headers: { 
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${this.token}`
-                    },
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload)
                 });
                 const data = await res.json();
                 if (data.error) throw new Error(data.error);
 
                 // Trigger initial deployment
-                await fetch('/api/deployments', {
+                await this.apiFetch('/api/deployments', {
                     method: 'POST',
-                    headers: { 
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${this.token}`
-                    },
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ projectId: data.project.id })
                 });
 
@@ -253,12 +275,9 @@ document.addEventListener('alpine:init', () => {
 
         async redeployProject(project) {
             try {
-                const res = await fetch('/api/deployments', {
+                const res = await this.apiFetch('/api/deployments', {
                     method: 'POST',
-                    headers: { 
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${this.token}`
-                    },
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ projectId: project.id })
                 });
                 if (!res.ok) throw new Error('Failed to start deployment');
@@ -273,12 +292,9 @@ document.addEventListener('alpine:init', () => {
         async createDb() {
             this.loading = true;
             try {
-                const res = await fetch('/api/databases', {
+                const res = await this.apiFetch('/api/databases', {
                     method: 'POST',
-                    headers: { 
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${this.token}`
-                    },
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(this.dbForm)
                 });
                 const data = await res.json();
@@ -298,9 +314,8 @@ document.addEventListener('alpine:init', () => {
         async deleteDatabase(db) {
             if (!confirm(`Are you sure you want to delete database ${db.name}?`)) return;
             try {
-                const res = await fetch(`/api/databases/${db.id}`, {
-                    method: 'DELETE',
-                    headers: { 'Authorization': `Bearer ${this.token}` }
+                const res = await this.apiFetch(`/api/databases/${db.id}`, {
+                    method: 'DELETE'
                 });
                 if (!res.ok) throw new Error('Failed to delete database');
                 this.fetchDatabases();
@@ -315,12 +330,9 @@ document.addEventListener('alpine:init', () => {
                 return this.showToast('Passwords do not match', 'error');
             }
             try {
-                const res = await fetch('/api/settings/change-password', {
+                const res = await this.apiFetch('/api/settings/change-password', {
                     method: 'POST',
-                    headers: { 
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${this.token}`
-                    },
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         currentPassword: this.passwordForm.current,
                         newPassword: this.passwordForm.new
@@ -352,12 +364,9 @@ document.addEventListener('alpine:init', () => {
                 const method = this.showModal === 'create-user' ? 'POST' : 'PUT';
                 const url = this.showModal === 'create-user' ? '/api/settings/users' : `/api/settings/users/${this.userForm.id}`;
                 
-                const res = await fetch(url, {
+                const res = await this.apiFetch(url, {
                     method,
-                    headers: { 
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${this.token}`
-                    },
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(this.userForm)
                 });
                 const data = await res.json();
@@ -384,12 +393,9 @@ document.addEventListener('alpine:init', () => {
                 const method = this.showModal === 'create-plan' ? 'POST' : 'PUT';
                 const url = this.showModal === 'create-plan' ? '/api/settings/plans' : `/api/settings/plans/${this.planForm.id}`;
                 
-                const res = await fetch(url, {
+                const res = await this.apiFetch(url, {
                     method,
-                    headers: { 
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${this.token}`
-                    },
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(this.planForm)
                 });
                 const data = await res.json();
@@ -408,9 +414,8 @@ document.addEventListener('alpine:init', () => {
         async deleteUser(user) {
             if (!confirm(`Delete user ${user.email}?`)) return;
             try {
-                const res = await fetch(`/api/settings/users/${user.id}`, {
-                    method: 'DELETE',
-                    headers: { 'Authorization': `Bearer ${this.token}` }
+                const res = await this.apiFetch(`/api/settings/users/${user.id}`, {
+                    method: 'DELETE'
                 });
                 if (!res.ok) throw new Error('Failed to delete user');
                 this.showToast('User deleted', 'success');
@@ -429,9 +434,8 @@ document.addEventListener('alpine:init', () => {
 
             this.loading = true;
             try {
-                const res = await fetch('/api/cdn/upload', {
+                const res = await this.apiFetch('/api/cdn/upload', {
                     method: 'POST',
-                    headers: { 'Authorization': `Bearer ${this.token}` },
                     body: formData
                 });
                 const data = await res.json();
@@ -450,9 +454,8 @@ document.addEventListener('alpine:init', () => {
         async deleteCdnFile(filename) {
             if (!confirm(`Delete ${filename}?`)) return;
             try {
-                const res = await fetch(`/api/cdn/${filename}`, {
-                    method: 'DELETE',
-                    headers: { 'Authorization': `Bearer ${this.token}` }
+                const res = await this.apiFetch(`/api/cdn/${filename}`, {
+                    method: 'DELETE'
                 });
                 if (!res.ok) throw new Error('Failed to delete file');
                 this.showToast('File deleted', 'success');
@@ -471,9 +474,8 @@ document.addEventListener('alpine:init', () => {
             if (!confirm(`Are you sure you want to delete ${project.name}? This will stop all containers and delete all files.`)) return;
             
             try {
-                const res = await fetch(`/api/projects/${project.id}`, {
-                    method: 'DELETE',
-                    headers: { 'Authorization': `Bearer ${this.token}` }
+                const res = await this.apiFetch(`/api/projects/${project.id}`, {
+                    method: 'DELETE'
                 });
                 if (!res.ok) throw new Error('Failed to delete project');
                 
@@ -494,9 +496,7 @@ document.addEventListener('alpine:init', () => {
 
         async fetchProjectDeployments(projectId) {
             try {
-                const res = await fetch(`/api/deployments/project/${projectId}`, {
-                    headers: { 'Authorization': `Bearer ${this.token}` }
-                });
+                const res = await this.apiFetch(`/api/deployments/project/${projectId}`);
                 const data = await res.json();
                 this.projectDeployments = data.deployments || [];
                 
