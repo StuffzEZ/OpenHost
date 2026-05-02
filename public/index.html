@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>OpenHost - Dashboard</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="/css/tailwind.min.css">
     <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
     <script src="/socket.io/socket.io.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -61,6 +61,7 @@
                         <div class="hidden sm:flex space-x-4">
                             <button @click="view = 'projects'" :class="view === 'projects' ? 'border-black text-black' : 'border-transparent text-gray-500 hover:text-black'" class="px-3 py-5 border-b-2 text-sm font-medium transition-all">Projects</button>
                             <button @click="view = 'databases'" :class="view === 'databases' ? 'border-black text-black' : 'border-transparent text-gray-500 hover:text-black'" class="px-3 py-5 border-b-2 text-sm font-medium transition-all">Databases</button>
+                            <button @click="view = 'cdn'" :class="view === 'cdn' ? 'border-black text-black' : 'border-transparent text-gray-500 hover:text-black'" class="px-3 py-5 border-b-2 text-sm font-medium transition-all">CDN / Storage</button>
                             <button @click="view = 'settings'" :class="view === 'settings' ? 'border-black text-black' : 'border-transparent text-gray-500 hover:text-black'" class="px-3 py-5 border-b-2 text-sm font-medium transition-all">Settings</button>
                         </div>
                     </div>
@@ -147,6 +148,170 @@
                     </template>
                 </div>
             </div>
+
+            <!-- CDN / Storage View -->
+            <div x-show="view === 'cdn'">
+                <div class="flex justify-between items-center mb-8">
+                    <div>
+                        <h2 class="text-2xl font-bold">CDN / Storage</h2>
+                        <p class="text-gray-500">Upload and manage static assets served via our CDN</p>
+                    </div>
+                    <button @click="showModal = 'upload-file'" class="bg-black text-white px-6 py-2 rounded-lg font-medium hover:bg-gray-800 transition-colors shadow-sm flex items-center gap-2">
+                        <i class="fas fa-upload"></i> Upload Asset
+                    </button>
+                </div>
+                <div class="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                    <table class="min-w-full divide-y divide-gray-200">
+                        <thead class="bg-gray-50">
+                            <tr>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">File</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Size</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">URL</th>
+                                <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody class="bg-white divide-y divide-gray-200">
+                            <template x-for="file in cdnFiles" :key="file.name">
+                                <tr>
+                                    <td class="px-6 py-4 whitespace-nowrap">
+                                        <div class="flex items-center">
+                                            <i class="far fa-file text-gray-400 mr-3"></i>
+                                            <span class="text-sm font-medium text-gray-900" x-text="file.name"></span>
+                                        </div>
+                                    </td>
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500" x-text="formatSize(file.size)"></td>
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500" x-text="file.type"></td>
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-blue-600 font-mono">
+                                        <div class="flex items-center gap-2">
+                                            <span class="truncate max-w-xs" x-text="file.url"></span>
+                                            <button @click="copy(file.url)" class="text-gray-400 hover:text-black"><i class="far fa-copy"></i></button>
+                                        </div>
+                                    </td>
+                                    <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                                        <button @click="deleteCdnFile(file.name)" class="text-red-600 hover:text-red-900"><i class="fas fa-trash"></i></button>
+                                    </td>
+                                </tr>
+                            </template>
+                            <tr x-show="cdnFiles.length === 0">
+                                <td colspan="5" class="px-6 py-10 text-center text-gray-500 italic">No assets uploaded yet</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Settings View -->
+            <div x-show="view === 'settings'">
+                <div class="mb-8">
+                    <h2 class="text-2xl font-bold">Settings</h2>
+                    <p class="text-gray-500">Manage your profile, password, and system preferences</p>
+                </div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                    <div class="lg:col-span-2 space-y-6">
+                        <!-- Profile Section -->
+                        <div class="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+                            <h3 class="text-lg font-bold mb-4 flex items-center gap-2">
+                                <i class="fas fa-user-circle"></i> Profile Information
+                            </h3>
+                            <div class="space-y-4">
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Email Address</label>
+                                    <input type="text" :value="user.email" disabled class="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-lg text-gray-500 cursor-not-allowed">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Role</label>
+                                    <span :class="user.isAdmin ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-700'" class="px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider" x-text="user.isAdmin ? 'Administrator' : 'User'"></span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Password Section -->
+                        <div class="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+                            <h3 class="text-lg font-bold mb-4 flex items-center gap-2">
+                                <i class="fas fa-key"></i> Change Password
+                            </h3>
+                            <form @submit.prevent="changePassword" class="space-y-4">
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Current Password</label>
+                                    <input type="password" x-model="passwordForm.current" required class="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-black outline-none">
+                                </div>
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-1">New Password</label>
+                                        <input type="password" x-model="passwordForm.new" required class="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-black outline-none">
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-1">Confirm New Password</label>
+                                        <input type="password" x-model="passwordForm.confirm" required class="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-black outline-none">
+                                    </div>
+                                </div>
+                                <button type="submit" class="bg-black text-white px-6 py-2 rounded-lg font-medium hover:bg-gray-800 transition-colors">Update Password</button>
+                            </form>
+                        </div>
+
+                        <!-- User Management (Admin Only) -->
+                        <div x-show="user.isAdmin" class="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+                            <div class="flex justify-between items-center mb-4">
+                                <h3 class="text-lg font-bold flex items-center gap-2">
+                                    <i class="fas fa-users"></i> User Management
+                                </h3>
+                                <button @click="showModal = 'create-user'" class="text-sm bg-black text-white px-3 py-1 rounded-lg hover:bg-gray-800">Add User</button>
+                            </div>
+                            <div class="overflow-hidden border border-gray-100 rounded-lg">
+                                <table class="min-w-full divide-y divide-gray-200">
+                                    <thead class="bg-gray-50">
+                                        <tr>
+                                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">User</th>
+                                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Role</th>
+                                            <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="bg-white divide-y divide-gray-200">
+                                        <template x-for="u in allUsers" :key="u.id">
+                                            <tr>
+                                                <td class="px-4 py-3 whitespace-nowrap text-sm" x-text="u.email"></td>
+                                                <td class="px-4 py-3 whitespace-nowrap text-sm">
+                                                    <span :class="u.is_admin ? 'text-purple-600 font-bold' : 'text-gray-500'" x-text="u.is_admin ? 'Admin' : 'User'"></span>
+                                                </td>
+                                                <td class="px-4 py-3 whitespace-nowrap text-right text-sm">
+                                                    <button @click="deleteUser(u)" x-show="u.id !== user.id" class="text-red-500 hover:text-red-700"><i class="fas fa-trash"></i></button>
+                                                </td>
+                                            </tr>
+                                        </template>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="space-y-6">
+                        <!-- System Info -->
+                        <div class="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+                            <h3 class="text-sm font-bold text-gray-400 uppercase tracking-widest mb-4">System Information</h3>
+                            <div class="space-y-3">
+                                <div class="flex justify-between text-sm">
+                                    <span class="text-gray-500">OpenHost Version</span>
+                                    <span class="font-mono font-bold" x-text="systemStats?.version"></span>
+                                </div>
+                                <div class="flex justify-between text-sm">
+                                    <span class="text-gray-500">Node.js</span>
+                                    <span class="font-mono" x-text="systemStats?.node_version"></span>
+                                </div>
+                                <div class="flex justify-between text-sm">
+                                    <span class="text-gray-500">Platform</span>
+                                    <span class="capitalize" x-text="systemStats?.platform"></span>
+                                </div>
+                                <div class="flex justify-between text-sm">
+                                    <span class="text-gray-500">Uptime</span>
+                                    <span x-text="formatUptime(systemStats?.uptime)"></span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </main>
     </div>
 
@@ -198,6 +363,25 @@
                         <div>
                             <label class="block text-xs font-semibold text-gray-500 mb-1">Start Command</label>
                             <input x-model="projectForm.start_command" type="text" class="w-full px-3 py-1.5 text-sm border border-gray-200 rounded bg-white" placeholder="npm start">
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-gray-500 mb-1">Environment Variables (KEY=VALUE, one per line)</label>
+                        <textarea x-model="projectForm.env_vars_raw" class="w-full px-3 py-1.5 text-sm border border-gray-200 rounded bg-white h-24 font-mono" placeholder="DATABASE_URL=postgres://...&#10;API_KEY=secret_123"></textarea>
+                    </div>
+                </div>
+                <div class="p-4 bg-blue-50 rounded-xl space-y-4">
+                    <h4 class="text-sm font-bold text-blue-700 flex items-center gap-2"><i class="fas fa-globe"></i> Custom Domain (DuckDNS)</h4>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-xs font-semibold text-blue-500 mb-1">DuckDNS Subdomain</label>
+                            <div class="flex">
+                                <input x-model="projectForm.duckdns_subdomain" type="text" class="flex-grow px-3 py-1.5 text-sm border border-blue-200 rounded-l bg-white" placeholder="my-custom-sub">
+                                <span class="bg-blue-100 px-2 py-1.5 text-xs text-blue-600 border border-l-0 border-blue-200 rounded-r">.duckdns.org</span>
+                            </div>
+                        </div>
+                        <div class="flex items-end">
+                            <p class="text-[10px] text-blue-600">If provided, this project will be accessible via DuckDNS. Make sure your DuckDNS token is set in the server environment.</p>
                         </div>
                     </div>
                 </div>
@@ -256,21 +440,143 @@
                     <button @click="selectedProject = null" class="text-gray-400 hover:text-black ml-4"><i class="fas fa-times"></i></button>
                 </div>
             </div>
-            <div class="flex-grow bg-black p-6 overflow-y-auto font-mono text-sm" id="log-container">
-                <template x-for="log in buildLogs" :key="log.timestamp">
-                    <div class="mb-1">
-                        <span class="text-gray-500" x-text="new Date(log.timestamp).toLocaleTimeString()"></span>
-                        <span :class="log.type === 'error' ? 'text-red-400' : (log.type === 'success' ? 'text-green-400' : 'text-blue-400')" class="mx-2" x-text="'[' + log.type.toUpperCase() + ']'"></span>
-                        <span class="text-gray-300" x-text="log.message"></span>
+            
+            <!-- Tabs -->
+            <div class="flex border-b border-gray-100 bg-white px-6">
+                <button @click="projectTab = 'logs'" :class="projectTab === 'logs' ? 'border-black text-black' : 'border-transparent text-gray-400 hover:text-black'" class="px-4 py-3 border-b-2 font-medium text-sm transition-all">Deployment Logs</button>
+                <button @click="projectTab = 'config'" :class="projectTab === 'config' ? 'border-black text-black' : 'border-transparent text-gray-400 hover:text-black'" class="px-4 py-3 border-b-2 font-medium text-sm transition-all">Configuration</button>
+                <button @click="projectTab = 'deployments'" :class="projectTab === 'deployments' ? 'border-black text-black' : 'border-transparent text-gray-400 hover:text-black'" class="px-4 py-3 border-b-2 font-medium text-sm transition-all">History</button>
+            </div>
+
+            <div class="flex-grow overflow-y-auto">
+                <!-- Logs Tab -->
+                <div x-show="projectTab === 'logs'" class="h-full bg-black p-6 font-mono text-sm" id="log-container">
+                    <template x-for="log in buildLogs" :key="log.timestamp">
+                        <div class="mb-1">
+                            <span class="text-gray-500" x-text="new Date(log.timestamp).toLocaleTimeString()"></span>
+                            <span :class="log.type === 'error' ? 'text-red-400' : (log.type === 'success' ? 'text-green-400' : 'text-blue-400')" class="mx-2" x-text="'[' + log.type.toUpperCase() + ']'"></span>
+                            <span class="text-gray-300" x-text="log.message"></span>
+                        </div>
+                    </template>
+                    <div x-show="buildLogs.length === 0" class="text-gray-600 italic">Waiting for deployment logs...</div>
+                </div>
+
+                <!-- Config Tab -->
+                <div x-show="projectTab === 'config'" class="p-6 space-y-6">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div>
+                            <h4 class="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">Build & Start</h4>
+                            <div class="bg-gray-50 p-4 rounded-lg space-y-2">
+                                <div class="text-sm"><span class="text-gray-500">Build:</span> <code class="bg-white px-1 rounded" x-text="selectedProject?.build_command || 'None'"></code></div>
+                                <div class="text-sm"><span class="text-gray-500">Start:</span> <code class="bg-white px-1 rounded" x-text="selectedProject?.start_command || 'Default'"></code></div>
+                                <div class="text-sm"><span class="text-gray-500">Type:</span> <span class="capitalize" x-text="selectedProject?.type"></span></div>
+                            </div>
+                        </div>
+                        <div>
+                            <h4 class="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">Git Info</h4>
+                            <div class="bg-gray-50 p-4 rounded-lg space-y-2">
+                                <div class="text-sm truncate"><span class="text-gray-500">Repo:</span> <a :href="selectedProject?.git_url" target="_blank" class="text-blue-600 hover:underline" x-text="selectedProject?.git_url"></a></div>
+                                <div class="text-sm"><span class="text-gray-500">Branch:</span> <code class="bg-white px-1 rounded" x-text="selectedProject?.branch"></code></div>
+                            </div>
+                        </div>
                     </div>
-                </template>
-                <div x-show="buildLogs.length === 0" class="text-gray-600 italic">Waiting for deployment logs...</div>
+                    <div>
+                        <h4 class="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">Environment Variables</h4>
+                        <div class="bg-gray-900 p-4 rounded-lg">
+                            <template x-for="(value, key) in selectedProject?.env_vars" :key="key">
+                                <div class="flex text-sm font-mono mb-1">
+                                    <span class="text-blue-400" x-text="key"></span>
+                                    <span class="text-gray-500 mx-2">=</span>
+                                    <span class="text-green-400 truncate" x-text="value"></span>
+                                </div>
+                            </template>
+                            <div x-show="!selectedProject?.env_vars || Object.keys(selectedProject.env_vars).length === 0" class="text-gray-600 italic text-sm">No environment variables set</div>
+                        </div>
+                    </div>
+                    <div x-show="selectedProject?.duckdns_subdomain">
+                        <h4 class="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">DuckDNS Settings</h4>
+                        <div class="bg-blue-50 p-4 rounded-lg flex items-center gap-3">
+                            <i class="fas fa-globe text-blue-500"></i>
+                            <div class="text-sm">
+                                <span class="text-gray-500">Custom Domain:</span>
+                                <a :href="'http://' + selectedProject?.duckdns_subdomain + '.duckdns.org'" target="_blank" class="font-bold text-blue-700 hover:underline" x-text="selectedProject?.duckdns_subdomain + '.duckdns.org'"></a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Deployments History Tab -->
+                <div x-show="projectTab === 'deployments'" class="p-6">
+                    <div class="space-y-4">
+                        <template x-for="dep in projectDeployments" :key="dep.id">
+                            <div class="flex items-center justify-between p-4 bg-white border border-gray-100 rounded-xl hover:border-gray-300 transition-all">
+                                <div class="flex items-center gap-4">
+                                    <div :class="dep.status === 'success' ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'" class="w-8 h-8 rounded-full flex items-center justify-center">
+                                        <i :class="dep.status === 'success' ? 'fas fa-check' : 'fas fa-times'"></i>
+                                    </div>
+                                    <div>
+                                        <div class="text-sm font-bold" x-text="'Deployment #' + dep.id"></div>
+                                        <div class="text-xs text-gray-500" x-text="formatDate(dep.created_at)"></div>
+                                    </div>
+                                </div>
+                                <button @click="viewDeploymentLogs(dep)" class="text-xs text-gray-400 hover:text-black font-bold uppercase">View Logs</button>
+                            </div>
+                        </template>
+                    </div>
+                </div>
             </div>
             <div class="p-4 border-t border-gray-100 bg-gray-50 flex justify-between items-center">
                 <div class="text-xs text-gray-500">
                     Subdomain: <span class="font-bold text-gray-700" x-text="selectedProject?.subdomain + '.localhost'"></span>
                 </div>
                 <button @click="deleteProject(selectedProject)" class="text-xs text-red-500 hover:text-red-700 font-bold uppercase tracking-wider">Delete Project</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Create User Modal -->
+    <div x-show="showModal === 'create-user'" x-cloak class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900 bg-opacity-50 backdrop-blur-sm">
+        <div class="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden" @click.away="showModal = null">
+            <div class="p-6 border-b border-gray-100">
+                <h3 class="text-xl font-bold text-gray-900">Create New User</h3>
+            </div>
+            <form @submit.prevent="createUser" class="p-6 space-y-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Email Address</label>
+                    <input x-model="userForm.email" required type="email" class="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-black outline-none" placeholder="user@example.com">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Password</label>
+                    <input x-model="userForm.password" required type="password" class="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-black outline-none" placeholder="••••••••">
+                </div>
+                <div class="flex items-center gap-2">
+                    <input type="checkbox" x-model="userForm.isAdmin" id="is-admin-check" class="rounded text-black focus:ring-black">
+                    <label for="is-admin-check" class="text-sm font-medium text-gray-700">Administrator Privileges</label>
+                </div>
+                <div class="flex justify-end gap-3 pt-4">
+                    <button type="button" @click="showModal = null" class="px-4 py-2 text-gray-600">Cancel</button>
+                    <button type="submit" :disabled="loading" class="bg-black text-white px-6 py-2 rounded-lg font-bold disabled:opacity-50 text-sm">Create User</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Upload Asset Modal -->
+    <div x-show="showModal === 'upload-file'" x-cloak class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900 bg-opacity-50 backdrop-blur-sm">
+        <div class="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden" @click.away="showModal = null">
+            <div class="p-6 border-b border-gray-100">
+                <h3 class="text-xl font-bold text-gray-900">Upload Asset to CDN</h3>
+            </div>
+            <div class="p-6 space-y-4">
+                <div class="border-2 border-dashed border-gray-200 rounded-xl p-8 text-center hover:border-black transition-colors cursor-pointer" @click="$refs.fileInput.click()">
+                    <input type="file" x-ref="fileInput" class="hidden" @change="uploadFile($event)">
+                    <i class="fas fa-cloud-upload-alt text-4xl text-gray-300 mb-4"></i>
+                    <p class="text-sm text-gray-500">Click or drag and drop to upload files</p>
+                    <p class="text-xs text-gray-400 mt-2">Max file size: 50MB</p>
+                </div>
+                <div class="flex justify-end pt-4">
+                    <button type="button" @click="showModal = null" class="px-4 py-2 text-gray-600">Cancel</button>
+                </div>
             </div>
         </div>
     </div>

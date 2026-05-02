@@ -3,6 +3,7 @@ const { exec } = require('child_process');
 const { promisify } = require('util');
 const fs = require('fs').promises;
 const path = require('path');
+const https = require('https');
 const { v4: uuidv4 } = require('uuid');
 const logger = require('../utils/logger');
 
@@ -47,6 +48,11 @@ class DeploymentService {
             // Generate nginx config
             await this.generateNginxConfig(project);
             await this.reloadNginx();
+
+            // Update DuckDNS if configured
+            if (project.duckdns_subdomain) {
+                await this.updateDuckDNS(project.duckdns_subdomain, io);
+            }
 
             // Cleanup build directory
             await fs.rm(buildDir, { recursive: true, force: true });
@@ -195,10 +201,18 @@ class DeploymentService {
     }
 
     async generateNginxConfig(project) {
+        const domains = [
+            `${project.subdomain}.localhost`,
+            `${project.subdomain}.*`
+        ];
+        if (project.duckdns_subdomain) {
+            domains.push(`${project.duckdns_subdomain}.duckdns.org`);
+        }
+
         const config = `
 server {
     listen 80;
-    server_name ${project.subdomain}.localhost ${project.subdomain}.* ;
+    server_name ${domains.join(' ')};
 
     location / {
         ${project.type === 'static' || project.type === 'react' ? `
@@ -237,6 +251,35 @@ server {
         } catch (error) {
             logger.error('Failed to reload nginx:', error);
         }
+    }
+
+    async updateDuckDNS(subdomain, io) {
+        const token = process.env.DUCKDNS_TOKEN;
+        if (!token) {
+            io.emit('build-log', { message: 'Warning: DUCKDNS_TOKEN not set, skipping DuckDNS update', type: 'error' });
+            return;
+        }
+
+        io.emit('build-log', { message: `Updating DuckDNS for ${subdomain}...`, type: 'info' });
+        
+        return new Promise((resolve, reject) => {
+            https.get(`https://www.duckdns.org/update?domains=${subdomain}&token=${token}&ip=`, (res) => {
+                let data = '';
+                res.on('data', (chunk) => data += chunk);
+                res.on('end', () => {
+                    if (data.trim() === 'OK') {
+                        io.emit('build-log', { message: `DuckDNS updated successfully for ${subdomain}`, type: 'success' });
+                        resolve();
+                    } else {
+                        io.emit('build-log', { message: `DuckDNS update failed: ${data}`, type: 'error' });
+                        resolve(); // Don't fail the whole deployment
+                    }
+                });
+            }).on('error', (err) => {
+                io.emit('build-log', { message: `DuckDNS update error: ${err.message}`, type: 'error' });
+                resolve(); // Don't fail the whole deployment
+            });
+        });
     }
 
     async fileExists(filePath) {

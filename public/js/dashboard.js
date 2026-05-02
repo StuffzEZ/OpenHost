@@ -8,13 +8,29 @@ document.addEventListener('alpine:init', () => {
         loading: false,
         projects: [],
         databases: [],
+        cdnFiles: [],
+        allUsers: [],
         selectedProject: null,
+        projectTab: 'logs',
+        projectDeployments: [],
         buildLogs: [],
         toasts: [],
+        systemStats: null,
         
         authForm: { email: '', password: '' },
-        projectForm: { name: '', subdomain: '', type: 'nodejs', git_url: '', build_command: '', start_command: '' },
+        projectForm: { 
+            name: '', 
+            subdomain: '', 
+            type: 'nodejs', 
+            git_url: '', 
+            build_command: '', 
+            start_command: '',
+            env_vars_raw: '',
+            duckdns_subdomain: ''
+        },
         dbForm: { name: '', type: 'postgres' },
+        passwordForm: { current: '', new: '', confirm: '' },
+        userForm: { email: '', password: '', isAdmin: false },
 
         init() {
             this.token = localStorage.getItem('oh_token');
@@ -24,6 +40,11 @@ document.addEventListener('alpine:init', () => {
                 this.fetchData();
             }
             this.initSocket();
+
+            this.$watch('view', (value) => {
+                if (value === 'settings') this.fetchSettings();
+                if (value === 'cdn') this.fetchCdnFiles();
+            });
         },
 
         initSocket() {
@@ -109,16 +130,69 @@ document.addEventListener('alpine:init', () => {
             }
         },
 
+        async fetchCdnFiles() {
+            try {
+                const res = await fetch('/api/cdn', {
+                    headers: { 'Authorization': `Bearer ${this.token}` }
+                });
+                const data = await res.json();
+                this.cdnFiles = data.files || [];
+            } catch (err) {
+                console.error('Failed to fetch CDN files', err);
+            }
+        },
+
+        async fetchSettings() {
+            try {
+                const res = await fetch('/api/settings', {
+                    headers: { 'Authorization': `Bearer ${this.token}` }
+                });
+                const data = await res.json();
+                this.systemStats = data.stats;
+                if (this.user.isAdmin) {
+                    this.fetchUsers();
+                }
+            } catch (err) {
+                console.error('Failed to fetch settings', err);
+            }
+        },
+
+        async fetchUsers() {
+            try {
+                const res = await fetch('/api/settings/users', {
+                    headers: { 'Authorization': `Bearer ${this.token}` }
+                });
+                const data = await res.json();
+                this.allUsers = data.users || [];
+            } catch (err) {
+                console.error('Failed to fetch users', err);
+            }
+        },
+
         async createProject() {
             this.loading = true;
             try {
+                // Parse env vars
+                const env_vars = {};
+                if (this.projectForm.env_vars_raw) {
+                    this.projectForm.env_vars_raw.split('\n').forEach(line => {
+                        const [key, ...valueParts] = line.split('=');
+                        if (key && valueParts.length > 0) {
+                            env_vars[key.trim()] = valueParts.join('=').trim();
+                        }
+                    });
+                }
+
+                const payload = { ...this.projectForm, env_vars };
+                delete payload.env_vars_raw;
+
                 const res = await fetch('/api/projects', {
                     method: 'POST',
                     headers: { 
                         'Content-Type': 'application/json',
                         'Authorization': `Bearer ${this.token}`
                     },
-                    body: JSON.stringify(this.projectForm)
+                    body: JSON.stringify(payload)
                 });
                 const data = await res.json();
                 if (data.error) throw new Error(data.error);
@@ -157,6 +231,7 @@ document.addEventListener('alpine:init', () => {
                 if (!res.ok) throw new Error('Failed to start deployment');
                 this.showToast('Redeployment started!', 'success');
                 this.buildLogs = [];
+                this.projectTab = 'logs';
             } catch (err) {
                 this.showToast(err.message, 'error');
             }
@@ -186,6 +261,114 @@ document.addEventListener('alpine:init', () => {
             }
         },
 
+        async changePassword() {
+            if (this.passwordForm.new !== this.passwordForm.confirm) {
+                return this.showToast('Passwords do not match', 'error');
+            }
+            try {
+                const res = await fetch('/api/settings/change-password', {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${this.token}`
+                    },
+                    body: JSON.stringify({
+                        currentPassword: this.passwordForm.current,
+                        newPassword: this.passwordForm.new
+                    })
+                });
+                const data = await res.json();
+                if (data.error) throw new Error(data.error);
+
+                this.showToast('Password updated successfully', 'success');
+                this.passwordForm = { current: '', new: '', confirm: '' };
+            } catch (err) {
+                this.showToast(err.message, 'error');
+            }
+        },
+
+        async createUser() {
+            this.loading = true;
+            try {
+                const res = await fetch('/api/settings/users', {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${this.token}`
+                    },
+                    body: JSON.stringify(this.userForm)
+                });
+                const data = await res.json();
+                if (data.error) throw new Error(data.error);
+
+                this.showToast('User created successfully', 'success');
+                this.showModal = null;
+                this.fetchUsers();
+                this.userForm = { email: '', password: '', isAdmin: false };
+            } catch (err) {
+                this.showToast(err.message, 'error');
+            } finally {
+                this.loading = false;
+            }
+        },
+
+        async deleteUser(user) {
+            if (!confirm(`Delete user ${user.email}?`)) return;
+            try {
+                const res = await fetch(`/api/settings/users/${user.id}`, {
+                    method: 'DELETE',
+                    headers: { 'Authorization': `Bearer ${this.token}` }
+                });
+                if (!res.ok) throw new Error('Failed to delete user');
+                this.showToast('User deleted', 'success');
+                this.fetchUsers();
+            } catch (err) {
+                this.showToast(err.message, 'error');
+            }
+        },
+
+        async uploadFile(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            this.loading = true;
+            try {
+                const res = await fetch('/api/cdn/upload', {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${this.token}` },
+                    body: formData
+                });
+                const data = await res.json();
+                if (data.error) throw new Error(data.error);
+
+                this.showToast('File uploaded successfully', 'success');
+                this.showModal = null;
+                this.fetchCdnFiles();
+            } catch (err) {
+                this.showToast(err.message, 'error');
+            } finally {
+                this.loading = false;
+            }
+        },
+
+        async deleteCdnFile(filename) {
+            if (!confirm(`Delete ${filename}?`)) return;
+            try {
+                const res = await fetch(`/api/cdn/${filename}`, {
+                    method: 'DELETE',
+                    headers: { 'Authorization': `Bearer ${this.token}` }
+                });
+                if (!res.ok) throw new Error('Failed to delete file');
+                this.showToast('File deleted', 'success');
+                this.fetchCdnFiles();
+            } catch (err) {
+                this.showToast(err.message, 'error');
+            }
+        },
+
         async deleteProject(project) {
             if (!confirm(`Are you sure you want to delete ${project.name}? This will stop all containers and delete all files.`)) return;
             
@@ -207,14 +390,20 @@ document.addEventListener('alpine:init', () => {
         selectProject(project) {
             this.selectedProject = project;
             this.buildLogs = [];
-            // Fetch existing logs if any
-            fetch(`/api/deployments/project/${project.id}`, {
-                headers: { 'Authorization': `Bearer ${this.token}` }
-            })
-            .then(res => res.json())
-            .then(data => {
-                if (data.deployments && data.deployments.length > 0) {
-                    const latest = data.deployments[0];
+            this.projectTab = 'logs';
+            this.fetchProjectDeployments(project.id);
+        },
+
+        async fetchProjectDeployments(projectId) {
+            try {
+                const res = await fetch(`/api/deployments/project/${projectId}`, {
+                    headers: { 'Authorization': `Bearer ${this.token}` }
+                });
+                const data = await res.json();
+                this.projectDeployments = data.deployments || [];
+                
+                if (this.projectDeployments.length > 0) {
+                    const latest = this.projectDeployments[0];
                     if (latest.build_logs) {
                         this.buildLogs = [{
                             timestamp: latest.deployed_at || latest.created_at,
@@ -223,7 +412,18 @@ document.addEventListener('alpine:init', () => {
                         }];
                     }
                 }
-            });
+            } catch (err) {
+                console.error('Failed to fetch deployments', err);
+            }
+        },
+
+        viewDeploymentLogs(deployment) {
+            this.buildLogs = [{
+                timestamp: deployment.deployed_at || deployment.created_at,
+                message: deployment.build_logs || 'No logs available for this deployment',
+                type: 'info'
+            }];
+            this.projectTab = 'logs';
         },
 
         getProjectIcon(type) {
@@ -259,6 +459,22 @@ document.addEventListener('alpine:init', () => {
         formatDate(date) {
             if (!date) return 'Never';
             return new Date(date).toLocaleDateString() + ' ' + new Date(date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        },
+
+        formatSize(bytes) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        },
+
+        formatUptime(seconds) {
+            if (!seconds) return '0s';
+            const h = Math.floor(seconds / 3600);
+            const m = Math.floor((seconds % 3600) / 60);
+            const s = Math.floor(seconds % 60);
+            return `${h}h ${m}m ${s}s`;
         },
 
         showToast(message, type = 'success') {

@@ -33,6 +33,7 @@ async function initDatabase() {
                 name VARCHAR(255) NOT NULL,
                 type VARCHAR(50) NOT NULL,
                 subdomain VARCHAR(100) UNIQUE,
+                duckdns_subdomain VARCHAR(100) UNIQUE,
                 git_url TEXT,
                 branch VARCHAR(100) DEFAULT 'main',
                 build_command TEXT,
@@ -43,6 +44,13 @@ async function initDatabase() {
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         `);
+
+        // Migration: add duckdns_subdomain if not exists
+        try {
+            await client.query('ALTER TABLE projects ADD COLUMN IF NOT EXISTS duckdns_subdomain VARCHAR(100) UNIQUE');
+        } catch (e) {
+            logger.info('Migration: duckdns_subdomain column might already exist');
+        }
 
         // Create deployments table
         await client.query(`

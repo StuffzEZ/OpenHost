@@ -22,21 +22,21 @@ router.get('/', authenticateToken, async (req, res) => {
 // Create project
 router.post('/', authenticateToken, async (req, res) => {
     try {
-        const { name, type, subdomain, git_url, branch, build_command, start_command, env_vars } = req.body;
+        const { name, type, subdomain, git_url, branch, build_command, start_command, env_vars, duckdns_subdomain } = req.body;
 
         const result = await query(
             `INSERT INTO projects 
-            (user_id, name, type, subdomain, git_url, branch, build_command, start_command, env_vars) 
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) 
+            (user_id, name, type, subdomain, duckdns_subdomain, git_url, branch, build_command, start_command, env_vars) 
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) 
             RETURNING *`,
-            [req.user.userId, name, type, subdomain, git_url, branch || 'main', build_command, start_command, env_vars || {}]
+            [req.user.userId, name, type, subdomain, duckdns_subdomain, git_url, branch || 'main', build_command, start_command, env_vars || {}]
         );
 
         res.status(201).json({ project: result.rows[0] });
     } catch (error) {
         logger.error('Create project error:', error);
         if (error.code === '23505') { // Unique constraint violation
-            return res.status(400).json({ error: 'Subdomain already taken' });
+            return res.status(400).json({ error: 'Subdomain or DuckDNS subdomain already taken' });
         }
         res.status(500).json({ error: 'Failed to create project' });
     }

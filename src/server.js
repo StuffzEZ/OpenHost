@@ -15,6 +15,7 @@ const deploymentRoutes = require('./routes/deployments');
 const projectRoutes = require('./routes/projects');
 const databaseRoutes = require('./routes/databases');
 const settingsRoutes = require('./routes/settings');
+const cdnRoutes = require('./routes/cdn');
 
 const app = express();
 const server = http.createServer(app);
@@ -33,7 +34,8 @@ app.set('io', io);
 // Middleware
 app.use(helmet({
     contentSecurityPolicy: false,
-    crossOriginEmbedderPolicy: false
+    crossOriginEmbedderPolicy: false,
+    crossOriginOpenerPolicy: false
 }));
 app.use(cors());
 
@@ -69,6 +71,7 @@ app.use('/api/deployments', deploymentRoutes);
 app.use('/api/projects', projectRoutes);
 app.use('/api/databases', databaseRoutes);
 app.use('/api/settings', settingsRoutes);
+app.use('/api/cdn', cdnRoutes);
 
 // Health check
 app.get('/health', (req, res) => {
