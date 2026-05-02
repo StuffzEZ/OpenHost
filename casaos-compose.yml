@@ -4,7 +4,6 @@ services:
     image: ghcr.io/stuffzez/openhost:latest
     container_name: openhost-main
     ports:
-      - "3000:3000"
       - "80:80"
       - "443:443"
     volumes:

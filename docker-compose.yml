@@ -1,11 +1,10 @@
-version: '3.8'
+version: "3.8"
 
 services:
   openhost:
     build: .
     container_name: openhost-main
     ports:
-      - "3000:3000"
       - "80:80"
       - "443:443"
     volumes:
