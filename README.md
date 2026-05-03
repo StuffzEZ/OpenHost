@@ -67,5 +67,3 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 ## 📄 License
 
 This project is licensed under the **GNU GPLv3** License - see the [LICENSE](LICENSE) file for details.
-
-Developed with ❤️ by [StuffzEZ](https://github.com/StuffzEZ)
