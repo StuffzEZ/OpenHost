@@ -11,12 +11,14 @@ document.addEventListener('alpine:init', () => {
         cdnFiles: [],
         allUsers: [],
         allPlans: [],
+        statusPages: [],
         selectedProject: null,
         projectTab: 'logs',
         projectDeployments: [],
         buildLogs: [],
         toasts: [],
         systemStats: null,
+        isDarkMode: false,
         
         authForm: { email: '', password: '' },
         projectForm: { 
@@ -36,10 +38,15 @@ document.addEventListener('alpine:init', () => {
         userForm: { id: null, email: '', password: '', isAdmin: false, planId: 1 },
         planForm: { id: null, name: '', max_projects: 3, max_databases: 2, max_storage_mb: 500, can_use_duckdns: false, can_use_custom_env: true },
         sharingForm: { resourceId: null, resourceType: '', email: '', sharedUsers: [] },
+        statusPageForm: { id: null, title: '', slug: '', description: '', show_last_deployment: true, show_uptime: true, is_public: true, items: [] },
 
         init() {
             this.token = localStorage.getItem('oh_token');
             const savedUser = localStorage.getItem('oh_user');
+            
+            // Initialize Dark Mode
+            this.isDarkMode = localStorage.getItem('oh_dark_mode') === 'true';
+            if (this.isDarkMode) document.documentElement.classList.add('dark');
             
             if (this.token && savedUser && savedUser !== 'null') {
                 this.isLoggedIn = true;
@@ -58,10 +65,21 @@ document.addEventListener('alpine:init', () => {
                 if (value === 'settings') this.fetchSettings();
                 if (value === 'cdn') this.fetchCdnFiles();
                 if (value === 'admin') this.fetchAdminData();
+                if (value === 'status-pages') this.fetchStatusPages();
             });
         },
 
-        // Custom fetch wrapper to handle 401/403 errors
+        toggleDarkMode() {
+            this.isDarkMode = !this.isDarkMode;
+            localStorage.setItem('oh_dark_mode', this.isDarkMode);
+            if (this.isDarkMode) {
+                document.documentElement.classList.add('dark');
+            } else {
+                document.documentElement.classList.remove('dark');
+            }
+        },
+
+        // ... (apiFetch remains the same)
         async apiFetch(url, options = {}) {
             if (!options.headers) options.headers = {};
             if (this.token) {
@@ -554,6 +572,97 @@ document.addEventListener('alpine:init', () => {
                 if (!res.ok) throw new Error('Failed to remove sharing');
                 this.showToast('Sharing removed', 'success');
                 await this.fetchSharedUsers();
+            } catch (err) {
+                this.showToast(err.message, 'error');
+            }
+        },
+
+        async fetchStatusPages() {
+            try {
+                const res = await this.apiFetch('/api/status');
+                const data = await res.json();
+                this.statusPages = data.status_pages || [];
+            } catch (err) {
+                console.error('Failed to fetch status pages', err);
+            }
+        },
+
+        openCreateStatusPage() {
+            this.statusPageForm = { id: null, title: '', slug: '', description: '', show_last_deployment: true, show_uptime: true, is_public: true, items: [] };
+            this.showModal = 'create-status';
+        },
+
+        addStatusItem() {
+            this.statusPageForm.items.push({ resource_key: '', display_name: '', resource_id: null, resource_type: '' });
+        },
+
+        updateStatusItem(index, key) {
+            if (!key) return;
+            const [type, id] = key.split(':');
+            this.statusPageForm.items[index].resource_id = parseInt(id);
+            this.statusPageForm.items[index].resource_type = type;
+            
+            // Auto-fill display name if empty
+            if (!this.statusPageForm.items[index].display_name) {
+                const resource = type === 'project' ? this.projects.find(p => p.id === parseInt(id)) : this.databases.find(d => d.id === parseInt(id));
+                if (resource) this.statusPageForm.items[index].display_name = resource.name;
+            }
+        },
+
+        async saveStatusPage() {
+            this.loading = true;
+            try {
+                const method = this.showModal === 'create-status' ? 'POST' : 'PUT';
+                const url = this.showModal === 'create-status' ? '/api/status' : `/api/status/${this.statusPageForm.id}`;
+                
+                const res = await this.apiFetch(url, {
+                    method,
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(this.statusPageForm)
+                });
+                const data = await res.json();
+                if (data.error) throw new Error(data.error);
+
+                this.showToast(this.showModal === 'create-status' ? 'Status page created' : 'Status page updated', 'success');
+                this.showModal = null;
+                this.fetchStatusPages();
+            } catch (err) {
+                this.showToast(err.message, 'error');
+            } finally {
+                this.loading = false;
+            }
+        },
+
+        async editStatusPage(page) {
+            this.loading = true;
+            try {
+                const res = await this.apiFetch(`/api/status/${page.id}/items`);
+                const data = await res.json();
+                
+                this.statusPageForm = { 
+                    ...page, 
+                    items: data.items.map(item => ({
+                        ...item,
+                        resource_key: `${item.resource_type}:${item.resource_id}`
+                    })) 
+                };
+                this.showModal = 'edit-status';
+            } catch (err) {
+                this.showToast('Failed to load status page items', 'error');
+            } finally {
+                this.loading = false;
+            }
+        },
+
+        async deleteStatusPage(id) {
+            if (!confirm('Are you sure you want to delete this status page?')) return;
+            try {
+                const res = await this.apiFetch(`/api/status/${id}`, {
+                    method: 'DELETE'
+                });
+                if (!res.ok) throw new Error('Failed to delete status page');
+                this.showToast('Status page deleted', 'success');
+                this.fetchStatusPages();
             } catch (err) {
                 this.showToast(err.message, 'error');
             }

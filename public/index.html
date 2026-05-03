@@ -11,9 +11,22 @@
     <style>
         [x-cloak] { display: none !important; }
         .glass { background: rgba(255, 255, 255, 0.7); backdrop-filter: blur(10px); }
+        .dark { background-color: #0f172a; color: #f8fafc; }
+        .dark .bg-white { background-color: #1e293b !important; }
+        .dark .border-gray-200, .dark .border-gray-100 { border-color: #334155 !important; }
+        .dark .text-gray-900, .dark h1, .dark h2, .dark h3 { color: #f8fafc !important; }
+        .dark .text-gray-500, .dark .text-gray-400 { color: #94a3b8 !important; }
+        .dark .bg-gray-50, .dark .bg-gray-100 { background-color: #1e293b !important; }
+        .dark .bg-gray-50 { background-color: #0f172a !important; }
+        .dark .bg-gray-900 { background-color: #020617 !important; }
     </style>
+    <script>
+        if (localStorage.getItem('oh_dark_mode') === 'true') {
+            document.documentElement.classList.add('dark');
+        }
+    </script>
 </head>
-<body class="bg-gray-50 text-gray-900 font-sans" x-data="openHost" x-init="init()">
+<body class="bg-gray-50 text-gray-900 font-sans transition-colors duration-200" :class="isDarkMode ? 'dark' : ''" x-data="openHost" x-init="init()">
     <!-- Login Overlay -->
     <div x-show="!isLoggedIn" x-cloak class="fixed inset-0 z-50 flex items-center justify-center bg-gray-900 bg-opacity-50 backdrop-blur-sm p-4">
         <div class="bg-white w-full max-w-md rounded-2xl shadow-2xl p-8">
@@ -62,13 +75,17 @@
                             <button @click="view = 'projects'" :class="view === 'projects' ? 'border-black text-black' : 'border-transparent text-gray-500 hover:text-black'" class="px-3 py-5 border-b-2 text-sm font-medium transition-all">Projects</button>
                             <button @click="view = 'databases'" :class="view === 'databases' ? 'border-black text-black' : 'border-transparent text-gray-500 hover:text-black'" class="px-3 py-5 border-b-2 text-sm font-medium transition-all">Databases</button>
                             <button @click="view = 'cdn'" :class="view === 'cdn' ? 'border-black text-black' : 'border-transparent text-gray-500 hover:text-black'" class="px-3 py-5 border-b-2 text-sm font-medium transition-all">CDN / Storage</button>
+                            <button @click="view = 'status-pages'" :class="view === 'status-pages' ? 'border-black text-black' : 'border-transparent text-gray-500 hover:text-black'" class="px-3 py-5 border-b-2 text-sm font-medium transition-all">Status Pages</button>
                             <button @click="view = 'admin'" x-show="user?.isAdmin" :class="view === 'admin' ? 'border-black text-black' : 'border-transparent text-gray-500 hover:text-black'" class="px-3 py-5 border-b-2 text-sm font-medium transition-all text-purple-600">Admin</button>
                             <button @click="view = 'settings'" :class="view === 'settings' ? 'border-black text-black' : 'border-transparent text-gray-500 hover:text-black'" class="px-3 py-5 border-b-2 text-sm font-medium transition-all">Settings</button>
                         </div>
                     </div>
                     <div class="flex items-center gap-4">
-                        <span class="text-sm text-gray-500" x-text="user?.email"></span>
-                        <button @click="logout" class="p-2 text-gray-400 hover:text-black transition-colors">
+                        <button @click="toggleDarkMode" class="p-2 text-gray-400 hover:text-black dark:hover:text-white transition-colors" title="Toggle Dark Mode">
+                            <i class="fas" :class="isDarkMode ? 'fa-sun' : 'fa-moon'"></i>
+                        </button>
+                        <span class="text-sm text-gray-500 dark:text-gray-400" x-text="user?.email"></span>
+                        <button @click="logout" class="p-2 text-gray-400 hover:text-black dark:hover:text-white transition-colors">
                             <i class="fas fa-sign-out-alt"></i>
                         </button>
                     </div>
@@ -126,6 +143,57 @@
                         <h3 class="text-xl font-bold mb-1">No projects yet</h3>
                         <p class="text-gray-500 mb-6">Connect a repository and start deploying</p>
                         <button @click="showModal = 'create-project'" class="text-black font-semibold hover:underline">Create your first project &rarr;</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Status Pages View -->
+            <div x-show="view === 'status-pages'" class="space-y-8">
+                <div class="flex justify-between items-center">
+                    <div>
+                        <h2 class="text-2xl font-bold text-gray-900 dark:text-white">Status Pages</h2>
+                        <p class="text-gray-500 dark:text-gray-400">Public monitoring pages for your projects and databases</p>
+                    </div>
+                    <button @click="openCreateStatusPage" class="bg-black dark:bg-white dark:text-black text-white px-6 py-2 rounded-lg font-medium hover:bg-gray-800 transition-colors shadow-sm flex items-center gap-2">
+                        <i class="fas fa-signal"></i> Create Status Page
+                    </button>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    <template x-for="page in statusPages" :key="page.id">
+                        <div class="bg-white dark:bg-gray-800 p-6 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm hover:shadow-md transition-all">
+                            <div class="flex justify-between items-start mb-4">
+                                <div class="w-10 h-10 bg-green-50 dark:bg-green-900/20 text-green-600 rounded-lg flex items-center justify-center">
+                                    <i class="fas fa-signal"></i>
+                                </div>
+                                <div class="flex gap-2">
+                                    <span :class="page.is_public ? 'bg-blue-50 text-blue-600' : 'bg-gray-100 text-gray-600'" class="text-[10px] font-bold uppercase px-2 py-1 rounded" x-text="page.is_public ? 'Public' : 'Private'"></span>
+                                </div>
+                            </div>
+                            <h3 class="font-bold text-lg mb-1 text-gray-900 dark:text-white" x-text="page.title"></h3>
+                            <p class="text-sm text-gray-500 dark:text-gray-400 mb-4 truncate" x-text="'/status/' + page.slug"></p>
+                            
+                            <div class="flex flex-wrap gap-2 mb-6">
+                                <template x-if="page.show_last_deployment">
+                                    <span class="text-[9px] bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 px-1.5 py-0.5 rounded font-bold uppercase tracking-wider">Deployments</span>
+                                </template>
+                                <template x-if="page.show_uptime">
+                                    <span class="text-[9px] bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 px-1.5 py-0.5 rounded font-bold uppercase tracking-wider">Uptime</span>
+                                </template>
+                            </div>
+
+                            <div class="flex justify-between items-center border-t border-gray-50 dark:border-gray-700 pt-4">
+                                <a :href="'/status/' + page.slug" target="_blank" class="text-xs text-blue-500 hover:underline font-bold uppercase tracking-widest">View Page</a>
+                                <div class="flex gap-3">
+                                    <button @click="editStatusPage(page)" class="text-gray-400 hover:text-black dark:hover:text-white transition-colors"><i class="fas fa-edit"></i></button>
+                                    <button @click="deleteStatusPage(page.id)" class="text-red-300 hover:text-red-600 transition-colors"><i class="fas fa-trash"></i></button>
+                                </div>
+                            </div>
+                        </div>
+                    </template>
+                    <div x-show="statusPages.length === 0" class="col-span-full py-12 text-center bg-gray-50 dark:bg-gray-800/50 rounded-2xl border-2 border-dashed border-gray-200 dark:border-gray-700">
+                        <i class="fas fa-signal text-gray-300 text-4xl mb-4"></i>
+                        <p class="text-gray-500">No status pages created yet.</p>
                     </div>
                 </div>
             </div>
@@ -850,6 +918,94 @@
                     <button type="button" @click="showModal = null" class="px-4 py-2 text-gray-600">Cancel</button>
                 </div>
             </div>
+        </div>
+    </div>
+
+    <!-- Create/Edit Status Page Modal -->
+    <div x-show="showModal === 'create-status' || showModal === 'edit-status'" x-cloak class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900 bg-opacity-50 backdrop-blur-sm">
+        <div class="bg-white dark:bg-gray-800 w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden" @click.away="showModal = null">
+            <div class="p-6 border-b border-gray-100 dark:border-gray-700 flex justify-between items-center">
+                <h3 class="text-xl font-bold text-gray-900 dark:text-white" x-text="showModal === 'create-status' ? 'Create Status Page' : 'Edit Status Page'"></h3>
+                <button @click="showModal = null" class="text-gray-400 hover:text-black dark:hover:text-white"><i class="fas fa-times"></i></button>
+            </div>
+            <form @submit.prevent="saveStatusPage" class="p-6 space-y-6 max-h-[80vh] overflow-y-auto">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Page Title</label>
+                        <input x-model="statusPageForm.title" required type="text" class="w-full px-4 py-2 border border-gray-200 dark:border-gray-700 dark:bg-gray-900 dark:text-white rounded-lg focus:ring-2 focus:ring-black outline-none" placeholder="My System Status">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">URL Slug</label>
+                        <input x-model="statusPageForm.slug" required type="text" class="w-full px-4 py-2 border border-gray-200 dark:border-gray-700 dark:bg-gray-900 dark:text-white rounded-lg focus:ring-2 focus:ring-black outline-none" placeholder="my-system">
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Description (Optional)</label>
+                    <textarea x-model="statusPageForm.description" class="w-full px-4 py-2 border border-gray-200 dark:border-gray-700 dark:bg-gray-900 dark:text-white rounded-lg focus:ring-2 focus:ring-black outline-none h-20" placeholder="A brief description of what this page monitors..."></textarea>
+                </div>
+
+                <div class="space-y-4">
+                    <h4 class="text-xs font-bold text-gray-400 uppercase tracking-widest">Configuration</h4>
+                    <div class="flex flex-wrap gap-4">
+                        <div class="flex items-center gap-2">
+                            <input type="checkbox" x-model="statusPageForm.show_last_deployment" id="show-dep-check" class="rounded text-black focus:ring-black">
+                            <label for="show-dep-check" class="text-sm font-medium text-gray-700 dark:text-gray-300">Show Last Deployment</label>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <input type="checkbox" x-model="statusPageForm.show_uptime" id="show-up-check" class="rounded text-black focus:ring-black">
+                            <label for="show-up-check" class="text-sm font-medium text-gray-700 dark:text-gray-300">Show Uptime</label>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <input type="checkbox" x-model="statusPageForm.is_public" id="is-pub-check" class="rounded text-black focus:ring-black">
+                            <label for="is-pub-check" class="text-sm font-medium text-gray-700 dark:text-gray-300">Publicly Accessible</label>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="space-y-4">
+                    <div class="flex justify-between items-center">
+                        <h4 class="text-xs font-bold text-gray-400 uppercase tracking-widest">Monitored Items</h4>
+                        <button type="button" @click="addStatusItem" class="text-xs bg-gray-100 dark:bg-gray-700 dark:text-white px-2 py-1 rounded hover:bg-gray-200">Add Item</button>
+                    </div>
+                    <div class="space-y-3">
+                        <template x-for="(item, index) in statusPageForm.items" :key="index">
+                            <div class="flex gap-2 items-end bg-gray-50 dark:bg-gray-900/50 p-3 rounded-lg border border-gray-100 dark:border-gray-700">
+                                <div class="flex-grow grid grid-cols-1 md:grid-cols-2 gap-3">
+                                    <div>
+                                        <label class="block text-[10px] font-bold text-gray-400 uppercase mb-1">Resource</label>
+                                        <select x-model="item.resource_key" @change="updateStatusItem(index, $event.target.value)" class="w-full px-3 py-1.5 text-sm border border-gray-200 dark:border-gray-700 dark:bg-gray-800 rounded bg-white">
+                                            <option value="">Select a resource...</option>
+                                            <optgroup label="Projects">
+                                                <template x-for="p in projects" :key="'p'+p.id">
+                                                    <option :value="'project:'+p.id" x-text="p.name"></option>
+                                                </template>
+                                            </optgroup>
+                                            <optgroup label="Databases">
+                                                <template x-for="d in databases" :key="'d'+d.id">
+                                                    <option :value="'database:'+d.id" x-text="d.name"></option>
+                                                </template>
+                                            </optgroup>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label class="block text-[10px] font-bold text-gray-400 uppercase mb-1">Display Name</label>
+                                        <input x-model="item.display_name" type="text" class="w-full px-3 py-1.5 text-sm border border-gray-200 dark:border-gray-700 dark:bg-gray-800 rounded bg-white" placeholder="e.g. Main API">
+                                    </div>
+                                </div>
+                                <button type="button" @click="statusPageForm.items.splice(index, 1)" class="p-2 text-red-400 hover:text-red-600"><i class="fas fa-times"></i></button>
+                            </div>
+                        </template>
+                        <div x-show="statusPageForm.items.length === 0" class="text-center py-4 text-sm text-gray-400 italic">No items added yet.</div>
+                    </div>
+                </div>
+
+                <div class="flex justify-end gap-3 pt-6 border-t border-gray-100 dark:border-gray-700">
+                    <button type="button" @click="showModal = null" class="px-6 py-2 text-gray-600 dark:text-gray-400">Cancel</button>
+                    <button type="submit" :disabled="loading" class="bg-black dark:bg-white dark:text-black text-white px-8 py-2 rounded-lg font-bold disabled:opacity-50 shadow-lg">
+                        <span x-text="showModal === 'create-status' ? 'Create Page' : 'Save Changes'"></span>
+                    </button>
+                </div>
+            </form>
         </div>
     </div>
 

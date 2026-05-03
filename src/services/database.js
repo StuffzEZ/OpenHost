@@ -133,6 +133,33 @@ async function initDatabase() {
             )
         `);
 
+        // Create status_pages table
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS status_pages (
+                id SERIAL PRIMARY KEY,
+                slug VARCHAR(100) UNIQUE NOT NULL,
+                user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                title VARCHAR(255) NOT NULL,
+                description TEXT,
+                show_last_deployment BOOLEAN DEFAULT true,
+                show_uptime BOOLEAN DEFAULT true,
+                is_public BOOLEAN DEFAULT true,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+
+        // Create status_page_items table
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS status_page_items (
+                id SERIAL PRIMARY KEY,
+                status_page_id INTEGER REFERENCES status_pages(id) ON DELETE CASCADE,
+                resource_id INTEGER NOT NULL,
+                resource_type VARCHAR(50) NOT NULL, -- 'project', 'database'
+                display_name VARCHAR(255),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+
         // Migrations
         try {
             await client.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS plan_id INTEGER REFERENCES plans(id) ON DELETE SET NULL');
