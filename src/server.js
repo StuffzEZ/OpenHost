@@ -8,7 +8,7 @@ const http = require('http');
 const socketIo = require('socket.io');
 require('dotenv').config();
 
-const { initDatabase } = require('./services/database');
+const { initDatabase, query } = require('./services/database');
 const logger = require('./utils/logger');
 const authRoutes = require('./routes/auth');
 const deploymentRoutes = require('./routes/deployments');
@@ -81,7 +81,6 @@ app.use('/api/status', statusRoutes);
 // Public status page route
 app.get('/status/:slug', async (req, res) => {
     try {
-        const { query } = require('./services/database');
         const pageResult = await query('SELECT * FROM status_pages WHERE slug = $1', [req.params.slug]);
         
         if (pageResult.rows.length === 0) {
@@ -111,19 +110,23 @@ app.get('/status/:slug', async (req, res) => {
             WHERE si.status_page_id = $1
         `, [page.id, page.show_last_deployment]);
 
-        res.send(\`
+        res.send(`
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>\${page.title} - OpenHost Status</title>
+    <title>${page.title} - OpenHost Status</title>
     <link rel="stylesheet" href="/css/tailwind.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
         .dark { background-color: #0f172a; color: #f8fafc; }
         .dark .card { background-color: #1e293b; border-color: #334155; }
         .dark h1, .dark h3 { color: white; }
+        .dark .text-gray-900 { color: #f8fafc; }
+        .dark .text-gray-800 { color: #f1f5f9; }
+        .dark .bg-white { background-color: #1e293b; }
+        .dark .border-gray-200 { border-color: #334155; }
     </style>
     <script>
         if (localStorage.getItem('oh_dark_mode') === 'true') {
@@ -134,33 +137,33 @@ app.get('/status/:slug', async (req, res) => {
 <body class="bg-gray-50 min-h-screen py-12 transition-colors duration-200">
     <div class="max-w-3xl mx-auto px-4">
         <div class="text-center mb-12">
-            <h1 class="text-4xl font-bold mb-4 text-gray-900">\${page.title}</h1>
-            \${page.description ? \`<p class="text-gray-500 dark:text-gray-400 text-lg">\${page.description}</p>\` : ''}
+            <h1 class="text-4xl font-bold mb-4 text-gray-900">${page.title}</h1>
+            ${page.description ? `<p class="text-gray-500 dark:text-gray-400 text-lg">${page.description}</p>` : ''}
         </div>
 
         <div class="space-y-4">
-            \${itemsResult.rows.map(item => \`
+            ${itemsResult.rows.map(item => `
                 <div class="card bg-white p-6 rounded-2xl border border-gray-200 shadow-sm flex items-center justify-between">
                     <div>
                         <div class="flex items-center gap-3">
-                            <i class="fas \${item.resource_type === 'project' ? 'fa-rocket text-blue-500' : 'fa-database text-purple-500'}"></i>
-                            <h3 class="font-bold text-xl text-gray-800">\${item.display_name}</h3>
+                            <i class="fas ${item.resource_type === 'project' ? 'fa-rocket text-blue-500' : 'fa-database text-purple-500'}"></i>
+                            <h3 class="font-bold text-xl text-gray-800">${item.display_name}</h3>
                         </div>
-                        \${item.last_deployment ? \`
+                        ${item.last_deployment ? `
                             <p class="text-xs text-gray-400 mt-1 uppercase font-bold tracking-widest">
-                                Last Deployed: \${new Date(item.last_deployment).toLocaleString()}
+                                Last Deployed: ${new Date(item.last_deployment).toLocaleString()}
                             </p>
-                        \` : ''}
+                        ` : ''}
                     </div>
                     <div class="flex items-center gap-2">
-                        <span class="w-3 h-3 rounded-full \${item.status === 'active' || item.status === 'success' ? 'bg-green-500' : 'bg-red-500'} animate-pulse"></span>
-                        <span class="font-bold uppercase tracking-tighter text-sm \${item.status === 'active' || item.status === 'success' ? 'text-green-600' : 'text-red-600'}">
-                            \${item.status === 'active' || item.status === 'success' ? 'Operational' : 'Outage'}
+                        <span class="w-3 h-3 rounded-full ${item.status === 'active' || item.status === 'success' ? 'bg-green-500' : 'bg-red-500'} animate-pulse"></span>
+                        <span class="font-bold uppercase tracking-tighter text-sm ${item.status === 'active' || item.status === 'success' ? 'text-green-600' : 'text-red-600'}">
+                            ${item.status === 'active' || item.status === 'success' ? 'Operational' : 'Outage'}
                         </span>
                     </div>
                 </div>
-            \`).join('')}
-            \${itemsResult.rows.length === 0 ? '<p class="text-center text-gray-400 italic">No items monitored on this page.</p>' : ''}
+            `).join('')}
+            ${itemsResult.rows.length === 0 ? '<p class="text-center text-gray-400 italic">No items monitored on this page.</p>' : ''}
         </div>
 
         <div class="mt-12 pt-8 border-t border-gray-200 dark:border-gray-800 text-center">
@@ -169,9 +172,9 @@ app.get('/status/:slug', async (req, res) => {
     </div>
 </body>
 </html>
-        \`);
+        `);
     } catch (error) {
-        console.error('Public status page error:', error);
+        logger.error('Public status page error:', error);
         res.status(500).send('Internal Server Error');
     }
 });
