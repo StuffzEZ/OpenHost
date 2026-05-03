@@ -9,10 +9,32 @@ const router = express.Router();
 // Get all databases
 router.get('/', authenticateToken, async (req, res) => {
     try {
-        const result = await query(
-            'SELECT * FROM databases WHERE user_id = $1 ORDER BY created_at DESC',
-            [req.user.userId]
-        );
+        let sql;
+        let params;
+
+        if (req.user.isAdmin) {
+            sql = `
+                SELECT d.*, u.email as owner_email,
+                CASE WHEN d.user_id = $1 THEN true ELSE false END as is_owner
+                FROM databases d
+                JOIN users u ON d.user_id = u.id
+                ORDER BY d.created_at DESC
+            `;
+            params = [req.user.userId];
+        } else {
+            sql = `
+                SELECT d.*, u.email as owner_email,
+                CASE WHEN d.user_id = $1 THEN true ELSE false END as is_owner
+                FROM databases d
+                JOIN users u ON d.user_id = u.id
+                WHERE d.user_id = $1 
+                OR d.id IN (SELECT resource_id FROM shared_access WHERE resource_type = 'database' AND user_id = $1)
+                ORDER BY d.created_at DESC
+            `;
+            params = [req.user.userId];
+        }
+
+        const result = await query(sql, params);
         res.json({ databases: result.rows });
     } catch (error) {
         logger.error('Get databases error:', error);
@@ -70,13 +92,21 @@ router.post('/', authenticateToken, async (req, res) => {
 // Delete database
 router.delete('/:id', authenticateToken, async (req, res) => {
     try {
-        const result = await query(
-            'SELECT * FROM databases WHERE id = $1 AND user_id = $2',
-            [req.params.id, req.user.userId]
-        );
+        let sql;
+        let params;
+
+        if (req.user.isAdmin) {
+            sql = 'SELECT * FROM databases WHERE id = $1';
+            params = [req.params.id];
+        } else {
+            sql = 'SELECT * FROM databases WHERE id = $1 AND user_id = $2';
+            params = [req.params.id, req.user.userId];
+        }
+
+        const result = await query(sql, params);
 
         if (result.rows.length === 0) {
-            return res.status(404).json({ error: 'Database not found' });
+            return res.status(404).json({ error: 'Database not found or unauthorized' });
         }
 
         const db = result.rows[0];

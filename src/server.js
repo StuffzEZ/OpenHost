@@ -16,6 +16,7 @@ const projectRoutes = require('./routes/projects');
 const databaseRoutes = require('./routes/databases');
 const settingsRoutes = require('./routes/settings');
 const cdnRoutes = require('./routes/cdn');
+const sharingRoutes = require('./routes/sharing');
 
 const app = express();
 const server = http.createServer(app);
@@ -73,6 +74,7 @@ app.use('/api/projects', projectRoutes);
 app.use('/api/databases', databaseRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/cdn', cdnRoutes);
+app.use('/api/sharing', sharingRoutes);
 
 // Health check
 app.get('/health', (req, res) => {

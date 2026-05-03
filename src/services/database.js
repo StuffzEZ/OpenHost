@@ -94,6 +94,45 @@ async function initDatabase() {
             )
         `);
 
+        // Create deployments table
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS deployments (
+                id SERIAL PRIMARY KEY,
+                project_id INTEGER REFERENCES projects(id) ON DELETE CASCADE,
+                version VARCHAR(50),
+                status VARCHAR(50) DEFAULT 'pending',
+                build_logs TEXT,
+                deploy_url TEXT,
+                deployed_at TIMESTAMP,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+
+        // Create cdn_assets table
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS cdn_assets (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                filename VARCHAR(255) NOT NULL,
+                original_name VARCHAR(255),
+                size INTEGER,
+                mime_type VARCHAR(100),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+
+        // Create shared_access table
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS shared_access (
+                id SERIAL PRIMARY KEY,
+                resource_id INTEGER NOT NULL,
+                resource_type VARCHAR(50) NOT NULL, -- 'project', 'database', 'cdn'
+                user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(resource_id, resource_type, user_id)
+            )
+        `);
+
         // Migrations
         try {
             await client.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS plan_id INTEGER REFERENCES plans(id) ON DELETE SET NULL');

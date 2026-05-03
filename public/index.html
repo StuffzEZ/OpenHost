@@ -99,10 +99,22 @@
                                 <div class="w-10 h-10 bg-gray-100 rounded-lg flex items-center justify-center group-hover:bg-black group-hover:text-white transition-colors">
                                     <i :class="getProjectIcon(project.type)"></i>
                                 </div>
-                                <span :class="getStatusClass(project.status)" class="text-xs font-bold uppercase tracking-wider px-2 py-1 rounded" x-text="project.status"></span>
+                                <div class="flex gap-1">
+                                    <template x-if="project.is_owner">
+                                        <button @click.stop="openSharing(project, 'project')" class="p-1.5 text-gray-400 hover:text-blue-600 transition-colors" title="Share Project">
+                                            <i class="fas fa-share-alt"></i>
+                                        </button>
+                                    </template>
+                                    <span :class="getStatusClass(project.status)" class="text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded" x-text="project.status"></span>
+                                </div>
                             </div>
                             <h3 class="font-bold text-lg mb-1" x-text="project.name"></h3>
-                            <p class="text-sm text-gray-500 mb-4 truncate" x-text="project.subdomain + '.localhost'"></p>
+                            <div class="flex items-center gap-2 mb-4">
+                                <code class="text-xs text-gray-500 bg-gray-50 px-2 py-0.5 rounded truncate" x-text="project.subdomain + '.localhost'"></code>
+                                <template x-if="!project.is_owner">
+                                    <span class="text-[10px] bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded font-bold" x-text="'Shared by ' + project.owner_email"></span>
+                                </template>
+                            </div>
                             <div class="flex items-center gap-4 text-xs text-gray-400">
                                 <span class="flex items-center gap-1"><i class="fas fa-clock"></i> <span x-text="formatDate(project.updated_at)"></span></span>
                                 <span class="flex items-center gap-1"><i class="fab fa-git-alt"></i> <span x-text="project.branch"></span></span>
@@ -137,10 +149,22 @@
                                 <div class="w-10 h-10 bg-blue-50 text-blue-600 rounded-lg flex items-center justify-center">
                                     <i :class="getDbIcon(db.type)"></i>
                                 </div>
-                                <span class="text-xs font-bold uppercase text-green-600 bg-green-50 px-2 py-1 rounded">Active</span>
+                                <div class="flex gap-1">
+                                    <template x-if="db.is_owner">
+                                        <button @click.stop="openSharing(db, 'database')" class="p-1.5 text-gray-400 hover:text-blue-600 transition-colors" title="Share Database">
+                                            <i class="fas fa-share-alt"></i>
+                                        </button>
+                                    </template>
+                                    <span class="text-xs font-bold uppercase text-green-600 bg-green-50 px-2 py-1 rounded">Active</span>
+                                </div>
                             </div>
                             <h3 class="font-bold text-lg mb-1" x-text="db.name"></h3>
-                            <p class="text-sm text-gray-500 mb-4 uppercase font-semibold tracking-tighter" x-text="db.type"></p>
+                            <div class="flex items-center gap-2 mb-4">
+                                <p class="text-sm text-gray-500 uppercase font-semibold tracking-tighter" x-text="db.type"></p>
+                                <template x-if="!db.is_owner">
+                                    <span class="text-[10px] bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded font-bold" x-text="'Shared by ' + db.owner_email"></span>
+                                </template>
+                            </div>
                             <div class="relative group mb-4">
                                 <code class="block w-full p-2 bg-gray-50 rounded text-xs text-gray-600 truncate font-mono" x-text="db.connection_string"></code>
                                 <button @click="copy(db.connection_string)" class="absolute right-2 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 p-1 bg-white border border-gray-200 rounded hover:bg-gray-50 transition-all shadow-sm">
@@ -173,6 +197,7 @@
                         <thead class="bg-gray-50">
                             <tr>
                                 <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">File</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Owner</th>
                                 <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Size</th>
                                 <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
                                 <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">URL</th>
@@ -180,13 +205,16 @@
                             </tr>
                         </thead>
                         <tbody class="bg-white divide-y divide-gray-200">
-                            <template x-for="file in cdnFiles" :key="file.name">
+                            <template x-for="file in cdnFiles" :key="file.id">
                                 <tr>
                                     <td class="px-6 py-4 whitespace-nowrap">
                                         <div class="flex items-center">
                                             <i class="far fa-file text-gray-400 mr-3"></i>
-                                            <span class="text-sm font-medium text-gray-900" x-text="file.name"></span>
+                                            <span class="text-sm font-medium text-gray-900" x-text="file.original_name"></span>
                                         </div>
+                                    </td>
+                                    <td class="px-6 py-4 whitespace-nowrap">
+                                        <span :class="file.is_owner ? 'text-gray-900' : 'text-blue-600 font-bold'" class="text-xs" x-text="file.is_owner ? 'You' : file.owner_email"></span>
                                     </td>
                                     <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500" x-text="formatSize(file.size)"></td>
                                     <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500" x-text="file.type"></td>
@@ -197,7 +225,12 @@
                                         </div>
                                     </td>
                                     <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                                        <button @click="deleteCdnFile(file.name)" class="text-red-600 hover:text-red-900"><i class="fas fa-trash"></i></button>
+                                        <div class="flex justify-end gap-2">
+                                            <template x-if="file.is_owner">
+                                                <button @click="openSharing(file, 'cdn')" class="text-gray-400 hover:text-blue-600"><i class="fas fa-share-alt"></i></button>
+                                            </template>
+                                            <button @click="deleteCdnFile(file.id)" class="text-red-600 hover:text-red-900"><i class="fas fa-trash"></i></button>
+                                        </div>
                                     </td>
                                 </tr>
                             </template>
@@ -399,6 +432,7 @@
                                     <div class="flex items-center gap-2">
                                         <span x-show="p.can_use_duckdns" class="bg-green-100 text-green-700 px-2 py-0.5 rounded text-[10px] font-bold uppercase">DuckDNS</span>
                                         <button @click="editPlan(p)" class="text-gray-400 hover:text-purple-600 p-2"><i class="fas fa-cog"></i></button>
+                                        <button @click="deletePlan(p)" class="text-red-300 hover:text-red-600 p-2"><i class="fas fa-trash-alt"></i></button>
                                     </div>
                                 </div>
                             </template>
@@ -814,6 +848,40 @@
                 </div>
                 <div class="flex justify-end pt-4">
                     <button type="button" @click="showModal = null" class="px-4 py-2 text-gray-600">Cancel</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Share Resource Modal -->
+    <div x-show="showModal === 'share-resource'" x-cloak class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900 bg-opacity-50 backdrop-blur-sm">
+        <div class="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden" @click.away="showModal = null">
+            <div class="p-6 border-b border-gray-100 flex justify-between items-center">
+                <h3 class="text-xl font-bold text-gray-900">Share <span class="capitalize" x-text="sharingForm.resourceType"></span></h3>
+                <button @click="showModal = null" class="text-gray-400 hover:text-black"><i class="fas fa-times"></i></button>
+            </div>
+            <div class="p-6 space-y-6">
+                <form @submit.prevent="shareResource" class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">User Email</label>
+                        <div class="flex gap-2">
+                            <input x-model="sharingForm.email" required type="email" class="flex-grow px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-black outline-none" placeholder="friend@example.com">
+                            <button type="submit" class="bg-black text-white px-4 py-2 rounded-lg font-bold text-sm">Share</button>
+                        </div>
+                    </div>
+                </form>
+
+                <div class="space-y-4">
+                    <h4 class="text-xs font-bold text-gray-400 uppercase tracking-widest">Currently Shared With</h4>
+                    <div class="space-y-2 max-h-48 overflow-y-auto">
+                        <template x-for="s in sharingForm.sharedUsers" :key="s.shared_id">
+                            <div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-100">
+                                <span class="text-sm text-gray-700 font-medium" x-text="s.email"></span>
+                                <button @click="removeSharing(s.shared_id)" class="text-red-400 hover:text-red-600 p-1"><i class="fas fa-user-minus"></i></button>
+                            </div>
+                        </template>
+                        <p x-show="sharingForm.sharedUsers.length === 0" class="text-sm text-gray-400 italic text-center py-4">Not shared with anyone yet</p>
+                    </div>
                 </div>
             </div>
         </div>

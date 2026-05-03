@@ -96,6 +96,30 @@ router.put('/plans/:id', authenticateToken, requireAdmin, async (req, res) => {
     }
 });
 
+router.delete('/plans/:id', authenticateToken, requireAdmin, async (req, res) => {
+    try {
+        const { id } = req.params;
+        
+        // Don't allow deleting the last plan
+        const count = await query('SELECT COUNT(*) FROM plans');
+        if (parseInt(count.rows[0].count) <= 1) {
+            return res.status(400).json({ error: 'Cannot delete the last remaining plan' });
+        }
+
+        // Reassign users to another plan before deleting
+        const anotherPlan = await query('SELECT id FROM plans WHERE id <> $1 LIMIT 1', [id]);
+        if (anotherPlan.rows.length > 0) {
+            await query('UPDATE users SET plan_id = $1 WHERE plan_id = $2', [anotherPlan.rows[0].id, id]);
+        }
+
+        await query('DELETE FROM plans WHERE id = $1', [id]);
+        res.json({ message: 'Plan deleted successfully' });
+    } catch (error) {
+        logger.error('Delete plan error:', error);
+        res.status(500).json({ error: 'Failed to delete plan' });
+    }
+});
+
 // User management (Admin only)
 router.get('/users', authenticateToken, requireAdmin, async (req, res) => {
     try {

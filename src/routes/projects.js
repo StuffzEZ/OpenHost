@@ -9,10 +9,34 @@ const router = express.Router();
 // Get all projects
 router.get('/', authenticateToken, async (req, res) => {
     try {
-        const result = await query(
-            'SELECT * FROM projects WHERE user_id = $1 ORDER BY created_at DESC',
-            [req.user.userId]
-        );
+        let sql;
+        let params;
+
+        if (req.user.isAdmin) {
+            // Admins see everything
+            sql = `
+                SELECT p.*, u.email as owner_email, 
+                CASE WHEN p.user_id = $1 THEN true ELSE false END as is_owner
+                FROM projects p
+                JOIN users u ON p.user_id = u.id
+                ORDER BY p.created_at DESC
+            `;
+            params = [req.user.userId];
+        } else {
+            // Users see their own + shared projects
+            sql = `
+                SELECT p.*, u.email as owner_email,
+                CASE WHEN p.user_id = $1 THEN true ELSE false END as is_owner
+                FROM projects p
+                JOIN users u ON p.user_id = u.id
+                WHERE p.user_id = $1 
+                OR p.id IN (SELECT resource_id FROM shared_access WHERE resource_type = 'project' AND user_id = $1)
+                ORDER BY p.created_at DESC
+            `;
+            params = [req.user.userId];
+        }
+
+        const result = await query(sql, params);
         res.json({ projects: result.rows });
     } catch (error) {
         logger.error('Get projects error:', error);
@@ -72,10 +96,22 @@ router.post('/', authenticateToken, async (req, res) => {
 // Get single project
 router.get('/:id', authenticateToken, async (req, res) => {
     try {
-        const result = await query(
-            'SELECT * FROM projects WHERE id = $1 AND user_id = $2',
-            [req.params.id, req.user.userId]
-        );
+        let sql;
+        let params;
+
+        if (req.user.isAdmin) {
+            sql = 'SELECT * FROM projects WHERE id = $1';
+            params = [req.params.id];
+        } else {
+            sql = `
+                SELECT * FROM projects 
+                WHERE id = $1 AND (user_id = $2 
+                OR id IN (SELECT resource_id FROM shared_access WHERE resource_type = 'project' AND user_id = $2))
+            `;
+            params = [req.params.id, req.user.userId];
+        }
+
+        const result = await query(sql, params);
         if (result.rows.length === 0) {
             return res.status(404).json({ error: 'Project not found' });
         }
@@ -89,12 +125,20 @@ router.get('/:id', authenticateToken, async (req, res) => {
 // Delete project
 router.delete('/:id', authenticateToken, async (req, res) => {
     try {
-        const result = await query(
-            'DELETE FROM projects WHERE id = $1 AND user_id = $2 RETURNING *',
-            [req.params.id, req.user.userId]
-        );
+        let sql;
+        let params;
+
+        if (req.user.isAdmin) {
+            sql = 'DELETE FROM projects WHERE id = $1 RETURNING *';
+            params = [req.params.id];
+        } else {
+            sql = 'DELETE FROM projects WHERE id = $1 AND user_id = $2 RETURNING *';
+            params = [req.params.id, req.user.userId];
+        }
+
+        const result = await query(sql, params);
         if (result.rows.length === 0) {
-            return res.status(404).json({ error: 'Project not found' });
+            return res.status(404).json({ error: 'Project not found or unauthorized' });
         }
         res.json({ message: 'Project deleted successfully' });
     } catch (error) {

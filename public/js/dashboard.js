@@ -35,6 +35,7 @@ document.addEventListener('alpine:init', () => {
         passwordForm: { current: '', new: '', confirm: '' },
         userForm: { id: null, email: '', password: '', isAdmin: false, planId: 1 },
         planForm: { id: null, name: '', max_projects: 3, max_databases: 2, max_storage_mb: 500, can_use_duckdns: false, can_use_custom_env: true },
+        sharingForm: { resourceId: null, resourceType: '', email: '', sharedUsers: [] },
 
         init() {
             this.token = localStorage.getItem('oh_token');
@@ -411,6 +412,23 @@ document.addEventListener('alpine:init', () => {
             }
         },
 
+        async deletePlan(plan) {
+            if (!confirm(`Are you sure you want to delete plan "${plan.name}"? Users on this plan will be moved to another plan.`)) return;
+            try {
+                const res = await this.apiFetch(`/api/settings/plans/${plan.id}`, {
+                    method: 'DELETE'
+                });
+                if (!res.ok) {
+                    const data = await res.json();
+                    throw new Error(data.error || 'Failed to delete plan');
+                }
+                this.showToast('Plan deleted', 'success');
+                this.fetchPlans();
+            } catch (err) {
+                this.showToast(err.message, 'error');
+            }
+        },
+
         async deleteUser(user) {
             if (!confirm(`Delete user ${user.email}?`)) return;
             try {
@@ -482,6 +500,60 @@ document.addEventListener('alpine:init', () => {
                 this.selectedProject = null;
                 this.fetchProjects();
                 this.showToast('Project deleted', 'success');
+            } catch (err) {
+                this.showToast(err.message, 'error');
+            }
+        },
+
+        async openSharing(resource, type) {
+            this.sharingForm.resourceId = resource.id;
+            this.sharingForm.resourceType = type;
+            this.sharingForm.email = '';
+            this.showModal = 'share-resource';
+            await this.fetchSharedUsers();
+        },
+
+        async fetchSharedUsers() {
+            try {
+                const res = await this.apiFetch(`/api/sharing/${this.sharingForm.resourceType}/${this.sharingForm.resourceId}`);
+                const data = await res.json();
+                this.sharingForm.sharedUsers = data.shared_users || [];
+            } catch (err) {
+                console.error('Failed to fetch shared users', err);
+            }
+        },
+
+        async shareResource() {
+            if (!this.sharingForm.email) return;
+            try {
+                const res = await this.apiFetch('/api/sharing', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        resourceId: this.sharingForm.resourceId,
+                        resourceType: this.sharingForm.resourceType,
+                        email: this.sharingForm.email
+                    })
+                });
+                const data = await res.json();
+                if (data.error) throw new Error(data.error);
+
+                this.showToast('Resource shared successfully', 'success');
+                this.sharingForm.email = '';
+                await this.fetchSharedUsers();
+            } catch (err) {
+                this.showToast(err.message, 'error');
+            }
+        },
+
+        async removeSharing(sharedId) {
+            try {
+                const res = await this.apiFetch(`/api/sharing/${sharedId}`, {
+                    method: 'DELETE'
+                });
+                if (!res.ok) throw new Error('Failed to remove sharing');
+                this.showToast('Sharing removed', 'success');
+                await this.fetchSharedUsers();
             } catch (err) {
                 this.showToast(err.message, 'error');
             }
