@@ -1,23 +1,27 @@
-const Docker = require('dockerode');
-const { exec } = require('child_process');
+const { exec, spawn } = require('child_process');
 const { promisify } = require('util');
 const fs = require('fs').promises;
 const path = require('path');
 const https = require('https');
 const { v4: uuidv4 } = require('uuid');
 const logger = require('../utils/logger');
+const { query } = require('./database');
 
 const execAsync = promisify(exec);
-const docker = new Docker({ socketPath: '/var/run/docker.sock' });
 
 class DeploymentService {
+    constructor() {
+        this.processes = new Map();
+        this.basePort = 10000;
+    }
+
     async buildAndDeploy(project, io) {
         const deploymentId = uuidv4();
         const buildDir = path.join('/app/builds', deploymentId);
         const deployDir = path.join('/app/deployments', project.subdomain);
 
         try {
-            // Stop and remove existing deployment if any
+            // Stop existing deployment
             await this.stopDeployment(project.subdomain);
 
             // Create build directory
@@ -37,12 +41,16 @@ class DeploymentService {
             // Copy built files to deployment directory
             await execAsync(`cp -r ${buildDir}/* ${deployDir}/`);
 
-            let containerId = null;
-            // Create and start container only for non-static project types
+            let port = project.port;
+            if (!port && project.type !== 'static' && project.type !== 'react') {
+                port = await this.getNextAvailablePort();
+                await query('UPDATE projects SET port = $1 WHERE id = $2', [port, project.id]);
+                project.port = port;
+            }
+
+            // Start process for non-static project types
             if (project.type !== 'static' && project.type !== 'react') {
-                const container = await this.createContainer(project, deployDir);
-                await container.start();
-                containerId = container.id;
+                await this.startProcess(project, deployDir, io);
             }
 
             // Generate nginx config
@@ -61,7 +69,7 @@ class DeploymentService {
                 success: true,
                 deploymentId,
                 url: `http://${project.subdomain}.localhost`,
-                containerId: containerId
+                port: port
             };
         } catch (error) {
             logger.error('Deployment error:', error);
@@ -71,6 +79,85 @@ class DeploymentService {
                 type: 'error'
             });
             throw error;
+        }
+    }
+
+    async startProcess(project, deployDir, io) {
+        const envVars = {
+            ...process.env,
+            ...project.env_vars,
+            PORT: project.port,
+            NODE_ENV: 'production'
+        };
+
+        let command, args;
+        const startCmd = project.start_command || this.getDefaultStartCommand(project.type);
+        
+        if (project.type === 'nodejs' || project.type === 'nextjs') {
+            command = 'sh';
+            args = ['-c', startCmd];
+        } else if (project.type === 'python') {
+            command = 'sh';
+            args = ['-c', startCmd];
+        }
+
+        io.emit('build-log', { projectId: project.id, message: `Starting process: ${startCmd} on port ${project.port}`, type: 'info' });
+
+        const child = spawn(command, args, {
+            cwd: deployDir,
+            env: envVars,
+            shell: true
+        });
+
+        child.stdout.on('data', (data) => {
+            const message = data.toString();
+            io.emit('build-log', { projectId: project.id, message, type: 'info' });
+            logger.info(`[${project.subdomain}] ${message}`);
+        });
+
+        child.stderr.on('data', (data) => {
+            const message = data.toString();
+            io.emit('build-log', { projectId: project.id, message, type: 'error' });
+            logger.error(`[${project.subdomain}] ${message}`);
+        });
+
+        child.on('close', (code) => {
+            logger.info(`Process for ${project.subdomain} exited with code ${code}`);
+            this.processes.delete(project.subdomain);
+        });
+
+        this.processes.set(project.subdomain, child);
+    }
+
+    getDefaultStartCommand(type) {
+        if (type === 'nodejs' || type === 'nextjs') return 'npm start';
+        if (type === 'python') return 'python3 app.py';
+        return 'npm start';
+    }
+
+    async getNextAvailablePort() {
+        const result = await query('SELECT MAX(port) as max_port FROM projects');
+        const maxPort = result.rows[0].max_port || (this.basePort - 1);
+        return maxPort + 1;
+    }
+
+    async initializeAllProjects(io) {
+        logger.info('Initializing all active projects...');
+        try {
+            const result = await query("SELECT * FROM projects WHERE status = 'active'");
+            for (const project of result.rows) {
+                if (project.type !== 'static' && project.type !== 'react') {
+                    const deployDir = path.join('/app/deployments', project.subdomain);
+                    if (await this.fileExists(deployDir)) {
+                        await this.startProcess(project, deployDir, io);
+                    } else {
+                        logger.warn(`Deployment directory not found for project: ${project.subdomain}`);
+                    }
+                }
+            }
+            logger.info(`Initialized ${result.rows.length} projects`);
+        } catch (error) {
+            logger.error('Failed to initialize projects:', error);
         }
     }
 
@@ -138,70 +225,6 @@ class DeploymentService {
         }
     }
 
-    async createContainer(project, deployDir) {
-        const containerName = `openhost-${project.subdomain}`;
-        const image = this.getDockerImage(project.type);
-
-        // Ensure image exists
-        try {
-            const stream = await docker.pull(image);
-            await new Promise((resolve, reject) => {
-                docker.modem.followProgress(stream, (err, res) => err ? reject(err) : resolve(res));
-            });
-            logger.info(`Pulled image: ${image}`);
-        } catch (error) {
-            logger.warn(`Failed to pull image ${image}, attempting to use local:`, error.message);
-        }
-
-        const envVars = Object.entries(project.env_vars || {}).map(
-            ([key, value]) => `${key}=${value}`
-        );
-
-        let containerConfig = {
-            name: containerName,
-            Image: this.getDockerImage(project.type),
-            Env: envVars,
-            HostConfig: {
-                Binds: [`${deployDir}:/app`],
-                NetworkMode: 'openhost-network',
-                RestartPolicy: { Name: 'unless-stopped' },
-                NanoCpus: parseFloat(project.cpu_limit || '0.5') * 1e9,
-                Memory: this.parseMemory(project.memory_limit || '512m')
-            }
-        };
-
-        // Add command based on project type
-        if (project.start_command) {
-            containerConfig.Cmd = ['/bin/sh', '-c', project.start_command];
-        } else {
-            containerConfig.Cmd = this.getDefaultCommand(project.type);
-        }
-
-        return await docker.createContainer(containerConfig);
-    }
-
-    getDockerImage(projectType) {
-        const images = {
-            'nodejs': 'node:20-alpine',
-            'python': 'python:3.11-alpine',
-            'static': 'nginx:alpine',
-            'react': 'nginx:alpine',
-            'nextjs': 'node:20-alpine'
-        };
-        return images[projectType] || 'node:20-alpine';
-    }
-
-    getDefaultCommand(projectType) {
-        const commands = {
-            'nodejs': ['/bin/sh', '-c', 'cd /app && npm start'],
-            'python': ['/bin/sh', '-c', 'cd /app && python3 app.py'],
-            'static': null, // nginx runs automatically
-            'react': null,  // nginx runs automatically
-            'nextjs': ['/bin/sh', '-c', 'cd /app && npm start']
-        };
-        return commands[projectType];
-    }
-
     async generateNginxConfig(project) {
         const domains = [
             `${project.subdomain}.localhost`,
@@ -210,10 +233,8 @@ class DeploymentService {
         
         const rootDomain = process.env.URL || process.env.DUCKDNS_ROOT_DOMAIN;
         if (project.duckdns_subdomain && rootDomain) {
-            // hello.world.duckdns.org (or custom domain)
             domains.push(`${project.duckdns_subdomain}.${rootDomain}`);
         } else if (project.duckdns_subdomain) {
-            // Fallback to legacy behavior if no root domain or URL is set
             domains.push(`${project.duckdns_subdomain}.duckdns.org`);
         }
 
@@ -228,7 +249,7 @@ server {
         index index.html;
         try_files $uri $uri/ /index.html;
         ` : `
-        proxy_pass http://openhost-${project.subdomain}:${this.getPort(project.type)};
+        proxy_pass http://localhost:${project.port};
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection 'upgrade';
@@ -241,25 +262,6 @@ server {
 
         const configPath = `/app/nginx-configs/${project.subdomain}.conf`;
         await fs.writeFile(configPath, config);
-    }
-
-    getPort(projectType) {
-        const ports = {
-            'nodejs': 3000,
-            'python': 8000,
-            'nextjs': 3000
-        };
-        return ports[projectType] || 3000;
-    }
-
-    parseMemory(mem) {
-        if (!mem) return 512 * 1024 * 1024;
-        const units = { 'k': 1024, 'm': 1024 * 1024, 'g': 1024 * 1024 * 1024 };
-        const match = mem.toLowerCase().match(/^(\d+)([kmg]?)$/);
-        if (!match) return 512 * 1024 * 1024;
-        const val = parseInt(match[1]);
-        const unit = match[2];
-        return val * (units[unit] || 1);
     }
 
     async reloadNginx() {
@@ -280,8 +282,6 @@ server {
             return;
         }
 
-        // If rootDomain is world.duckdns.org, we update 'world'
-        // If no rootDomain, we update projectSubdomain
         let domainToUpdate = projectSubdomain;
         if (rootDomain) {
             domainToUpdate = rootDomain.split('.')[0];
@@ -295,16 +295,16 @@ server {
                 res.on('data', (chunk) => data += chunk);
                 res.on('end', () => {
                     if (data.trim() === 'OK') {
-                        io.emit('build-log', { message: `DuckDNS updated successfully for ${subdomain}`, type: 'success' });
+                        io.emit('build-log', { message: `DuckDNS updated successfully`, type: 'success' });
                         resolve();
                     } else {
                         io.emit('build-log', { message: `DuckDNS update failed: ${data}`, type: 'error' });
-                        resolve(); // Don't fail the whole deployment
+                        resolve();
                     }
                 });
             }).on('error', (err) => {
                 io.emit('build-log', { message: `DuckDNS update error: ${err.message}`, type: 'error' });
-                resolve(); // Don't fail the whole deployment
+                resolve();
             });
         });
     }
@@ -319,15 +319,22 @@ server {
     }
 
     async stopDeployment(subdomain) {
-        const containerName = `openhost-${subdomain}`;
-        try {
-            const container = docker.getContainer(containerName);
-            await container.stop();
-            await container.remove();
-            logger.info(`Stopped and removed container: ${containerName}`);
-        } catch (error) {
-            logger.warn(`Failed to stop container ${containerName}:`, error.message);
+        const child = this.processes.get(subdomain);
+        if (child) {
+            child.kill();
+            this.processes.delete(subdomain);
+            logger.info(`Stopped process for: ${subdomain}`);
         }
+
+        // Also try to find and kill process using the port if it was leaked
+        // This is a safety measure
+        try {
+            const projectResult = await query('SELECT port FROM projects WHERE subdomain = $1', [subdomain]);
+            if (projectResult.rows.length > 0 && projectResult.rows[0].port) {
+                const port = projectResult.rows[0].port;
+                await execAsync(`fuser -k ${port}/tcp`).catch(() => {});
+            }
+        } catch (e) {}
 
         // Remove nginx config
         const configPath = `/app/nginx-configs/${subdomain}.conf`;

@@ -72,6 +72,7 @@ async function initDatabase() {
                 memory_limit VARCHAR(50) DEFAULT '512m',
                 deploy_token VARCHAR(255) UNIQUE,
                 status VARCHAR(50) DEFAULT 'inactive',
+                port INTEGER,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
@@ -165,6 +166,7 @@ async function initDatabase() {
             await client.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS plan_id INTEGER REFERENCES plans(id) ON DELETE SET NULL');
             await client.query('ALTER TABLE projects ADD COLUMN IF NOT EXISTS cpu_limit VARCHAR(50) DEFAULT "0.5"');
             await client.query('ALTER TABLE projects ADD COLUMN IF NOT EXISTS memory_limit VARCHAR(50) DEFAULT "512m"');
+            await client.query('ALTER TABLE projects ADD COLUMN IF NOT EXISTS port INTEGER');
             await client.query('ALTER TABLE databases ADD COLUMN IF NOT EXISTS db_user VARCHAR(100)');
             await client.query('ALTER TABLE databases ADD COLUMN IF NOT EXISTS db_password TEXT');
             await client.query('ALTER TABLE databases ADD COLUMN IF NOT EXISTS db_port INTEGER');

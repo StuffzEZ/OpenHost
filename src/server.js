@@ -9,6 +9,7 @@ const socketIo = require('socket.io');
 require('dotenv').config();
 
 const { initDatabase, query } = require('./services/database');
+const deploymentService = require('./services/deployment');
 const logger = require('./utils/logger');
 const authRoutes = require('./routes/auth');
 const deploymentRoutes = require('./routes/deployments');
@@ -212,6 +213,9 @@ async function start() {
     try {
         await initDatabase();
         logger.info('Database initialized successfully');
+        
+        // Initialize active projects
+        await deploymentService.initializeAllProjects(io);
         
         server.listen(PORT, '0.0.0.0', () => {
             logger.info(`OpenHost server running on port ${PORT}`);
