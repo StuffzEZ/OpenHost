@@ -3,7 +3,7 @@ const bcrypt = require('bcryptjs');
 const logger = require('../utils/logger');
 
 const pool = new Pool({
-    host: process.env.POSTGRES_HOST || 'localhost',
+    host: process.env.POSTGRES_HOST || 'postgres',
     port: process.env.POSTGRES_PORT || 5432,
     database: process.env.POSTGRES_DB || 'openhost',
     user: process.env.POSTGRES_USER || 'openhost',
@@ -164,8 +164,8 @@ async function initDatabase() {
         // Migrations
         try {
             await client.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS plan_id INTEGER REFERENCES plans(id) ON DELETE SET NULL');
-            await client.query('ALTER TABLE projects ADD COLUMN IF NOT EXISTS cpu_limit VARCHAR(50) DEFAULT "0.5"');
-            await client.query('ALTER TABLE projects ADD COLUMN IF NOT EXISTS memory_limit VARCHAR(50) DEFAULT "512m"');
+            await client.query("ALTER TABLE projects ADD COLUMN IF NOT EXISTS cpu_limit VARCHAR(50) DEFAULT '0.5'");
+            await client.query("ALTER TABLE projects ADD COLUMN IF NOT EXISTS memory_limit VARCHAR(50) DEFAULT '512m'");
             await client.query('ALTER TABLE projects ADD COLUMN IF NOT EXISTS port INTEGER');
             await client.query('ALTER TABLE databases ADD COLUMN IF NOT EXISTS db_user VARCHAR(100)');
             await client.query('ALTER TABLE databases ADD COLUMN IF NOT EXISTS db_password TEXT');

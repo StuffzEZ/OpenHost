@@ -17,9 +17,14 @@ class DatabaseService {
 
         // Platform's shared MongoDB instance
         this.mongoUri = `mongodb://admin:adminpassword@${process.env.MONGO_HOST || 'mongodb'}:27017`;
+        
+        // Redis config
+        this.redisHost = process.env.REDIS_HOST || 'redis';
+        this.redisPort = process.env.REDIS_PORT || 6379;
+        this.redisPassword = process.env.REDIS_PASSWORD || '';
     }
 
-    async createDatabase(type, name, customUser, customPassword, customPort) {
+    async createDatabase(type, name, customUser, customPassword, customPort, dbId) {
         const password = customPassword || uuidv4();
         const dbUser = customUser || 'openhost';
         let connectionString = '';
@@ -36,9 +41,10 @@ class DatabaseService {
                     break;
                 case 'redis':
                     // Redis "databases" are just numbered slots (0-15 by default)
-                    // We'll just provide the shared connection string. 
+                    // We'll use a hash of the name or just a default slot for now.
                     // In a production environment, you'd use ACLs or separate instances.
-                    connectionString = `redis://:${process.env.REDIS_PASSWORD || ''}@${process.env.REDIS_HOST || 'redis'}:${process.env.REDIS_PORT || 6379}`;
+                    const redisDb = (dbId % 16) || 0;
+                    connectionString = `redis://:${this.redisPassword}@${this.redisHost}:${this.redisPort}/${redisDb}`;
                     break;
                 default:
                     throw new Error(`Unsupported database type: ${type}`);

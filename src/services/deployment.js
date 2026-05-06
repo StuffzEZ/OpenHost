@@ -124,6 +124,21 @@ class DeploymentService {
         child.on('close', (code) => {
             logger.info(`Process for ${project.subdomain} exited with code ${code}`);
             this.processes.delete(project.subdomain);
+            
+            // Auto-restart if it crashed and project is still active
+            if (code !== 0 && code !== null) {
+                logger.info(`Attempting to restart ${project.subdomain}...`);
+                setTimeout(async () => {
+                    try {
+                        const check = await query("SELECT status FROM projects WHERE subdomain = $1", [project.subdomain]);
+                        if (check.rows.length > 0 && check.rows[0].status === 'active') {
+                            await this.startProcess(project, deployDir, io);
+                        }
+                    } catch (e) {
+                        logger.error(`Restart failed for ${project.subdomain}:`, e);
+                    }
+                }, 5000);
+            }
         });
 
         this.processes.set(project.subdomain, child);
@@ -273,24 +288,18 @@ server {
         }
     }
 
-    async updateDuckDNS(projectSubdomain, io) {
+    async updateDuckDNS(duckdnsSubdomain, io) {
         const token = process.env.DUCKDNS_TOKEN;
-        const rootDomain = process.env.DUCKDNS_ROOT_DOMAIN;
         
         if (!token) {
             io.emit('build-log', { message: 'Warning: DUCKDNS_TOKEN not set, skipping DuckDNS update', type: 'error' });
             return;
         }
 
-        let domainToUpdate = projectSubdomain;
-        if (rootDomain) {
-            domainToUpdate = rootDomain.split('.')[0];
-        }
-
-        io.emit('build-log', { message: `Updating DuckDNS for ${domainToUpdate}.duckdns.org...`, type: 'info' });
+        io.emit('build-log', { message: `Updating DuckDNS for ${duckdnsSubdomain}.duckdns.org...`, type: 'info' });
         
         return new Promise((resolve, reject) => {
-            https.get(`https://www.duckdns.org/update?domains=${domainToUpdate}&token=${token}&ip=`, (res) => {
+            https.get(`https://www.duckdns.org/update?domains=${duckdnsSubdomain}&token=${token}&ip=`, (res) => {
                 let data = '';
                 res.on('data', (chunk) => data += chunk);
                 res.on('end', () => {

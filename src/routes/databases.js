@@ -75,14 +75,27 @@ router.post('/', authenticateToken, async (req, res) => {
             }
         }
 
-        const dbResult = await databaseService.createDatabase(type, name, dbUser, dbPassword, dbPort);
-
-        const result = await query(
-            'INSERT INTO databases (user_id, name, type, db_user, db_password, db_port, container_name, connection_string) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *',
-            [req.user.userId, name, type, dbResult.dbUser, dbResult.dbPassword, dbResult.dbPort, dbResult.containerName, dbResult.connectionString]
+        // Create database record first to get an ID (useful for Redis slot allocation)
+        const initialResult = await query(
+            'INSERT INTO databases (user_id, name, type, status) VALUES ($1, $2, $3, $4) RETURNING id',
+            [req.user.userId, name, type, 'creating']
         );
+        const dbId = initialResult.rows[0].id;
 
-        res.status(201).json({ database: result.rows[0] });
+        try {
+            const dbResult = await databaseService.createDatabase(type, name, dbUser, dbPassword, dbPort, dbId);
+
+            const result = await query(
+                'UPDATE databases SET db_user = $1, db_password = $2, db_port = $3, container_name = $4, connection_string = $5, status = $6 WHERE id = $7 RETURNING *',
+                [dbResult.dbUser, dbResult.dbPassword, dbResult.dbPort, dbResult.containerName, dbResult.connectionString, 'active', dbId]
+            );
+
+            res.status(201).json({ database: result.rows[0] });
+        } catch (error) {
+            // Cleanup on failure
+            await query('DELETE FROM databases WHERE id = $1', [dbId]);
+            throw error;
+        }
     } catch (error) {
         logger.error('Create database error:', error);
         res.status(500).json({ error: error.message || 'Failed to create database' });

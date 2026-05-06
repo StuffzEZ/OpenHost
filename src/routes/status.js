@@ -41,10 +41,16 @@ router.post('/', authenticateToken, async (req, res) => {
         // Add items
         if (items && Array.isArray(items)) {
             for (const item of items) {
-                await query(
-                    'INSERT INTO status_page_items (status_page_id, resource_id, resource_type, display_name) VALUES ($1, $2, $3, $4)',
-                    [pageId, item.resource_id, item.resource_type, item.display_name]
-                );
+                // Security Check: Verify user owns the resource or is admin
+                let table = item.resource_type === 'project' ? 'projects' : 'databases';
+                const resourceCheck = await query(`SELECT id FROM ${table} WHERE id = $1 AND (user_id = $2 OR $3 = true)`, [item.resource_id, req.user.userId, req.user.isAdmin]);
+                
+                if (resourceCheck.rows.length > 0) {
+                    await query(
+                        'INSERT INTO status_page_items (status_page_id, resource_id, resource_type, display_name) VALUES ($1, $2, $3, $4)',
+                        [pageId, item.resource_id, item.resource_type, item.display_name]
+                    );
+                }
             }
         }
 
@@ -81,10 +87,16 @@ router.put('/:id', authenticateToken, async (req, res) => {
         await query('DELETE FROM status_page_items WHERE status_page_id = $1', [pageId]);
         if (items && Array.isArray(items)) {
             for (const item of items) {
-                await query(
-                    'INSERT INTO status_page_items (status_page_id, resource_id, resource_type, display_name) VALUES ($1, $2, $3, $4)',
-                    [pageId, item.resource_id, item.resource_type, item.display_name]
-                );
+                // Security Check: Verify user owns the resource or is admin
+                let table = item.resource_type === 'project' ? 'projects' : 'databases';
+                const resourceCheck = await query(`SELECT id FROM ${table} WHERE id = $1 AND (user_id = $2 OR $3 = true)`, [item.resource_id, req.user.userId, req.user.isAdmin]);
+                
+                if (resourceCheck.rows.length > 0) {
+                    await query(
+                        'INSERT INTO status_page_items (status_page_id, resource_id, resource_type, display_name) VALUES ($1, $2, $3, $4)',
+                        [pageId, item.resource_id, item.resource_type, item.display_name]
+                    );
+                }
             }
         }
 
