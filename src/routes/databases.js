@@ -1,7 +1,7 @@
 const express = require('express');
 const { query } = require('../services/database');
 const databaseService = require('../services/database_service');
-const { authenticateToken } = require('../middleware/auth');
+const { authenticateToken, requirePermission } = require('../middleware/auth');
 const logger = require('../utils/logger');
 
 const router = express.Router();
@@ -9,10 +9,9 @@ const router = express.Router();
 // Get all databases
 router.get('/', authenticateToken, async (req, res) => {
     try {
-        let sql;
-        let params;
+        let sql, params;
 
-        if (req.user.isAdmin) {
+        if (req.user.isAdmin || req.user.isModerator) {
             sql = `
                 SELECT d.*, u.email as owner_email,
                 CASE WHEN d.user_id = $1 THEN true ELSE false END as is_owner
@@ -27,7 +26,7 @@ router.get('/', authenticateToken, async (req, res) => {
                 CASE WHEN d.user_id = $1 THEN true ELSE false END as is_owner
                 FROM databases d
                 JOIN users u ON d.user_id = u.id
-                WHERE d.user_id = $1 
+                WHERE d.user_id = $1
                 OR d.id IN (SELECT resource_id FROM shared_access WHERE resource_type = 'database' AND user_id = $1)
                 ORDER BY d.created_at DESC
             `;
@@ -43,7 +42,7 @@ router.get('/', authenticateToken, async (req, res) => {
 });
 
 // Create database
-router.post('/', authenticateToken, async (req, res) => {
+router.post('/', authenticateToken, requirePermission('databases.create'), async (req, res) => {
     try {
         const { name, type, dbUser, dbPassword, dbPort } = req.body;
 
@@ -51,9 +50,17 @@ router.post('/', authenticateToken, async (req, res) => {
             return res.status(400).json({ error: 'Name and type are required' });
         }
 
-        // SANITIZATION: Prevent illegal characters in DB names/users that could bypass SQL quoting
+        if (!['postgres', 'redis'].includes(type)) {
+            return res.status(400).json({ error: 'Database type must be postgres or redis' });
+        }
+
+        // Sanitize database name
         if (!/^[a-zA-Z0-9_-]+$/.test(name) || (dbUser && !/^[a-zA-Z0-9_-]+$/.test(dbUser))) {
-            return res.status(400).json({ error: 'Database and User names must be alphanumeric (underscores allowed)' });
+            return res.status(400).json({ error: 'Database and User names must be alphanumeric (underscores and hyphens allowed)' });
+        }
+
+        if (name.length > 63) {
+            return res.status(400).json({ error: 'Database name must be 63 characters or less' });
         }
 
         // Check user quota
@@ -68,14 +75,28 @@ router.post('/', authenticateToken, async (req, res) => {
 
         if (userQuota.rows.length > 0) {
             const { max_databases, current_count } = userQuota.rows[0];
-            
-            // STRICT QUOTA CHECK
             if (parseInt(current_count) >= max_databases) {
                 return res.status(403).json({ error: `Database limit reached (${max_databases}). Upgrade your plan for more.` });
             }
         }
 
-        // Create database record first to get an ID (useful for Redis slot allocation)
+        // Check if approval is required
+        const approvalSetting = await query("SELECT value FROM platform_settings WHERE key = 'require_approval'");
+        const requireApproval = approvalSetting.rows[0]?.value === 'true';
+
+        if (requireApproval && !req.user.isAdmin) {
+            const approvalResult = await query(
+                `INSERT INTO admin_approvals (user_id, resource_type, resource_name, request_data, status)
+                 VALUES ($1, 'database', $2, $3, 'pending') RETURNING *`,
+                [req.user.userId, name, JSON.stringify({ name, type, dbUser, dbPort })]
+            );
+            return res.status(202).json({
+                message: 'Database creation submitted for admin approval',
+                approvalId: approvalResult.rows[0].id
+            });
+        }
+
+        // Create database record
         const initialResult = await query(
             'INSERT INTO databases (user_id, name, type, status) VALUES ($1, $2, $3, $4) RETURNING id',
             [req.user.userId, name, type, 'creating']
@@ -83,7 +104,7 @@ router.post('/', authenticateToken, async (req, res) => {
         const dbId = initialResult.rows[0].id;
 
         try {
-            const dbResult = await databaseService.createDatabase(type, name, dbUser, dbPassword, dbPort, dbId);
+            const dbResult = await databaseService.createDatabase(type, name, dbUser, dbPassword, dbPort, dbId, req.user.userId);
 
             const result = await query(
                 'UPDATE databases SET db_user = $1, db_password = $2, db_port = $3, container_name = $4, connection_string = $5, status = $6 WHERE id = $7 RETURNING *',
@@ -92,7 +113,6 @@ router.post('/', authenticateToken, async (req, res) => {
 
             res.status(201).json({ database: result.rows[0] });
         } catch (error) {
-            // Cleanup on failure
             await query('DELETE FROM databases WHERE id = $1', [dbId]);
             throw error;
         }
@@ -103,12 +123,11 @@ router.post('/', authenticateToken, async (req, res) => {
 });
 
 // Delete database
-router.delete('/:id', authenticateToken, async (req, res) => {
+router.delete('/:id', authenticateToken, requirePermission('databases.delete'), async (req, res) => {
     try {
-        let sql;
-        let params;
+        let sql, params;
 
-        if (req.user.isAdmin) {
+        if (req.user.isAdmin || req.user.isModerator) {
             sql = 'SELECT * FROM databases WHERE id = $1';
             params = [req.params.id];
         } else {
@@ -117,14 +136,12 @@ router.delete('/:id', authenticateToken, async (req, res) => {
         }
 
         const result = await query(sql, params);
-
         if (result.rows.length === 0) {
             return res.status(404).json({ error: 'Database not found or unauthorized' });
         }
 
         const db = result.rows[0];
         await databaseService.stopDatabase(db.container_name, db.type, db.name, db.db_user);
-
         await query('DELETE FROM databases WHERE id = $1', [req.params.id]);
 
         res.json({ message: 'Database deleted successfully' });

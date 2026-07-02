@@ -10,7 +10,7 @@ OpenHost is a powerful, self-hosted deployment platform designed to be a lightwe
 
 - **Multi-Framework Support**: Deploy Node.js, Python, React, Next.js, and Static HTML projects.
 - **Git Integration**: Deploy directly from any public Git repository.
-- **Database Hosting**: One-click provisioning for PostgreSQL, Redis, and MongoDB.
+- **Database Hosting**: One-click provisioning for PostgreSQL and Redis.
 - **Modern Dashboard**: Clean, intuitive UI for managing your projects and databases.
 - **Real-time Logs**: Watch your builds and deployments happen live via WebSockets.
 - **Custom Subdomains**: Automatically manages Nginx configurations for your projects.

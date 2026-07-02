@@ -17,31 +17,29 @@ services:
       - POSTGRES_PORT=5432
       - POSTGRES_DB=openhost
       - POSTGRES_USER=openhost
-      - POSTGRES_PASSWORD=changeme123
-      - REDIS_HOST=openhost-redis
-      - REDIS_PORT=6379
-      - JWT_SECRET=change-this-secret-key
-      - ADMIN_EMAIL=admin@openhost.local
-      - ADMIN_PASSWORD=admin123
-      - DUCKDNS_TOKEN=TOKEN...
-      - DUCKDNS_ROOT_DOMAIN=HELLO.DUCKDNS.ORG
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+      - JWT_SECRET=${JWT_SECRET:?Set JWT_SECRET}
+      - ADMIN_EMAIL=${ADMIN_EMAIL:-admin@openhost.local}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:?Set ADMIN_PASSWORD}
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     restart: unless-stopped
     networks:
       - openhost-network
     x-casaos:
       author: StuffzEZ
       category: Development
-      description: Self-hosted deployment platform for code, websites, and databases.
+      description: Full-featured self-hosted deployment platform with RBAC, resource limiting, and admin approvals.
       developer: StuffzEZ
       icon: https://raw.githubusercontent.com/StuffzEZ/OpenHost/main/public/favicon.ico
       main: openhost
       port_map: "80"
       scheme: http
       title: OpenHost
-      tagline: Your self-hosted Vercel alternative.
+      tagline: Your self-hosted Vercel alternative with RBAC and resource management.
 
   postgres:
     image: postgres:15-alpine
@@ -49,21 +47,32 @@ services:
     environment:
       - POSTGRES_DB=openhost
       - POSTGRES_USER=openhost
-      - POSTGRES_PASSWORD=changeme123
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
     volumes:
       - /DATA/AppData/openhost/pgdata:/var/lib/postgresql/data
     restart: unless-stopped
     networks:
       - openhost-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U openhost -d openhost"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
   redis:
     image: redis:7-alpine
     container_name: openhost-redis
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
     volumes:
       - /DATA/AppData/openhost/redisdata:/data
     restart: unless-stopped
     networks:
       - openhost-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
 networks:
   openhost-network:

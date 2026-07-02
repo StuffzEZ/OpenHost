@@ -11,6 +11,8 @@ document.addEventListener('alpine:init', () => {
         cdnFiles: [],
         allUsers: [],
         allPlans: [],
+        allRoles: [],
+        allPermissions: [],
         statusPages: [],
         selectedProject: null,
         projectTab: 'logs',
@@ -19,35 +21,40 @@ document.addEventListener('alpine:init', () => {
         toasts: [],
         systemStats: null,
         isDarkMode: false,
-        
+        platformSettings: {},
+        approvals: [],
+        customDomains: [],
+        auditLog: [],
+        selectedUser: null,
+        userProjects: [],
+        userDatabases: [],
+
         authForm: { email: '', password: '' },
-        projectForm: { 
-            name: '', 
-            subdomain: '', 
-            type: 'nodejs', 
-            git_url: '', 
-            build_command: '', 
-            start_command: '',
-            env_vars_raw: '',
-            duckdns_subdomain: '',
-            cpu_limit: '0.5',
-            memory_limit: '512m'
+        projectForm: {
+            name: '', subdomain: '', type: 'nodejs', git_url: '', branch: 'main',
+            build_command: '', start_command: '', env_vars_raw: '',
+            custom_domain: '', cpu_limit: '0.5', memory_limit: '512m'
         },
         dbForm: { name: '', type: 'postgres', dbUser: '', dbPassword: '', dbPort: null },
         passwordForm: { current: '', new: '', confirm: '' },
-        userForm: { id: null, email: '', password: '', isAdmin: false, planId: 1 },
-        planForm: { id: null, name: '', max_projects: 3, max_databases: 2, max_storage_mb: 500, can_use_duckdns: false, can_use_custom_env: true },
+        userForm: { id: null, email: '', password: '', roleId: 1, planId: 1, suspended: false, suspendedReason: '' },
+        planForm: { id: null, name: '', max_projects: 3, max_databases: 2, max_storage_mb: 500,
+                     max_cpu_cores: 1.0, max_memory_mb: 1024, max_bandwidth_gb: 10,
+                     can_use_custom_domains: false, can_use_custom_env: true, can_use_cron_jobs: false, can_use_docker: false, priority: 0 },
+        roleForm: { id: null, name: '', display_name: '', color: '#6b7280', permissionIds: [] },
         sharingForm: { resourceId: null, resourceType: '', email: '', sharedUsers: [] },
         statusPageForm: { id: null, title: '', slug: '', description: '', show_last_deployment: true, show_uptime: true, is_public: true, items: [] },
+        domainForm: { domain: '', projectId: null },
+        approvalFilter: 'pending',
+        adminTab: 'users',
 
         init() {
             this.token = localStorage.getItem('oh_token');
             const savedUser = localStorage.getItem('oh_user');
-            
-            // Initialize Dark Mode
+
             this.isDarkMode = localStorage.getItem('oh_dark_mode') === 'true';
             if (this.isDarkMode) document.documentElement.classList.add('dark');
-            
+
             if (this.token && savedUser && savedUser !== 'null') {
                 this.isLoggedIn = true;
                 try {
@@ -66,6 +73,7 @@ document.addEventListener('alpine:init', () => {
                 if (value === 'cdn') this.fetchCdnFiles();
                 if (value === 'admin') this.fetchAdminData();
                 if (value === 'status-pages') this.fetchStatusPages();
+                if (value === 'domains') this.fetchDomains();
             });
         },
 
@@ -79,7 +87,6 @@ document.addEventListener('alpine:init', () => {
             }
         },
 
-        // ... (apiFetch remains the same)
         async apiFetch(url, options = {}) {
             if (!options.headers) options.headers = {};
             if (this.token) {
@@ -88,16 +95,15 @@ document.addEventListener('alpine:init', () => {
 
             try {
                 const res = await fetch(url, options);
-                
+
                 if (res.status === 401 || res.status === 403) {
-                    // Only logout if we're not on the login call itself
                     if (!url.includes('/api/auth/login')) {
                         this.logout();
                         this.showToast('Session expired. Please log in again.', 'error');
                         throw new Error('Unauthorized');
                     }
                 }
-                
+
                 return res;
             } catch (err) {
                 console.error(`API Fetch Error (${url}):`, err);
@@ -165,7 +171,7 @@ document.addEventListener('alpine:init', () => {
             if (!this.isLoggedIn) return;
             try {
                 await Promise.all([
-                    this.fetchProjects(), 
+                    this.fetchProjects(),
                     this.fetchDatabases(),
                     this.fetchSettings()
                 ]);
@@ -217,7 +223,7 @@ document.addEventListener('alpine:init', () => {
         },
 
         async fetchAdminData() {
-            await Promise.all([this.fetchUsers(), this.fetchPlans()]);
+            await Promise.all([this.fetchUsers(), this.fetchPlans(), this.fetchRoles(), this.fetchApprovals(), this.fetchPlatformSettings()]);
         },
 
         async fetchUsers() {
@@ -240,10 +246,59 @@ document.addEventListener('alpine:init', () => {
             }
         },
 
+        async fetchRoles() {
+            try {
+                const res = await this.apiFetch('/api/settings/roles');
+                const data = await res.json();
+                this.allRoles = data.roles || [];
+            } catch (err) {
+                console.error('Failed to fetch roles', err);
+            }
+        },
+
+        async fetchApprovals() {
+            try {
+                const res = await this.apiFetch(`/api/settings/approvals?status=${this.approvalFilter}`);
+                const data = await res.json();
+                this.approvals = data.approvals || [];
+            } catch (err) {
+                console.error('Failed to fetch approvals', err);
+            }
+        },
+
+        async fetchPlatformSettings() {
+            try {
+                const res = await this.apiFetch('/api/settings/platform-settings');
+                const data = await res.json();
+                this.platformSettings = data.settings || {};
+            } catch (err) {
+                console.error('Failed to fetch platform settings', err);
+            }
+        },
+
+        async fetchDomains() {
+            try {
+                const res = await this.apiFetch('/api/settings/domains');
+                const data = await res.json();
+                this.customDomains = data.domains || [];
+            } catch (err) {
+                console.error('Failed to fetch domains', err);
+            }
+        },
+
+        async fetchAuditLog() {
+            try {
+                const res = await this.apiFetch('/api/settings/audit-log?limit=100');
+                const data = await res.json();
+                this.auditLog = data.entries || [];
+            } catch (err) {
+                console.error('Failed to fetch audit log', err);
+            }
+        },
+
         async createProject() {
             this.loading = true;
             try {
-                // Parse env vars
                 const env_vars = {};
                 if (this.projectForm.env_vars_raw) {
                     this.projectForm.env_vars_raw.split('\n').forEach(line => {
@@ -265,7 +320,6 @@ document.addEventListener('alpine:init', () => {
                 const data = await res.json();
                 if (data.error) throw new Error(data.error);
 
-                // Trigger initial deployment
                 await this.apiFetch('/api/deployments', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -285,10 +339,10 @@ document.addEventListener('alpine:init', () => {
         },
 
         resetProjectForm() {
-            this.projectForm = { 
-                name: '', subdomain: '', type: 'nodejs', git_url: '', 
-                build_command: '', start_command: '', env_vars_raw: '', 
-                duckdns_subdomain: '', cpu_limit: '0.5', memory_limit: '512m' 
+            this.projectForm = {
+                name: '', subdomain: '', type: 'nodejs', git_url: '', branch: 'main',
+                build_command: '', start_command: '', env_vars_raw: '',
+                custom_domain: '', cpu_limit: '0.5', memory_limit: '512m'
             };
         },
 
@@ -333,9 +387,7 @@ document.addEventListener('alpine:init', () => {
         async deleteDatabase(db) {
             if (!confirm(`Are you sure you want to delete database ${db.name}?`)) return;
             try {
-                const res = await this.apiFetch(`/api/databases/${db.id}`, {
-                    method: 'DELETE'
-                });
+                const res = await this.apiFetch(`/api/databases/${db.id}`, { method: 'DELETE' });
                 if (!res.ok) throw new Error('Failed to delete database');
                 this.fetchDatabases();
                 this.showToast('Database deleted', 'success');
@@ -352,14 +404,10 @@ document.addEventListener('alpine:init', () => {
                 const res = await this.apiFetch('/api/settings/change-password', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        currentPassword: this.passwordForm.current,
-                        newPassword: this.passwordForm.new
-                    })
+                    body: JSON.stringify({ currentPassword: this.passwordForm.current, newPassword: this.passwordForm.new })
                 });
                 const data = await res.json();
                 if (data.error) throw new Error(data.error);
-
                 this.showToast('Password updated successfully', 'success');
                 this.passwordForm = { current: '', new: '', confirm: '' };
             } catch (err) {
@@ -367,12 +415,12 @@ document.addEventListener('alpine:init', () => {
             }
         },
 
+        // ========== User Management ==========
         editUser(user) {
-            this.userForm = { 
-                id: user.id, 
-                email: user.email, 
-                isAdmin: user.is_admin, 
-                planId: user.plan_id || 1 
+            this.userForm = {
+                id: user.id, email: user.email, roleId: user.role_id || 1,
+                planId: user.plan_id || 1, suspended: user.suspended || false,
+                suspendedReason: user.suspended_reason || ''
             };
             this.showModal = 'edit-user';
         },
@@ -382,7 +430,7 @@ document.addEventListener('alpine:init', () => {
             try {
                 const method = this.showModal === 'create-user' ? 'POST' : 'PUT';
                 const url = this.showModal === 'create-user' ? '/api/settings/users' : `/api/settings/users/${this.userForm.id}`;
-                
+
                 const res = await this.apiFetch(url, {
                     method,
                     headers: { 'Content-Type': 'application/json' },
@@ -401,6 +449,36 @@ document.addEventListener('alpine:init', () => {
             }
         },
 
+        async deleteUser(user) {
+            if (!confirm(`Delete user ${user.email}? This will also delete all their projects and databases.`)) return;
+            try {
+                const res = await this.apiFetch(`/api/settings/users/${user.id}`, { method: 'DELETE' });
+                if (!res.ok) throw new Error('Failed to delete user');
+                this.showToast('User deleted', 'success');
+                this.fetchUsers();
+            } catch (err) {
+                this.showToast(err.message, 'error');
+            }
+        },
+
+        async viewUserProfile(user) {
+            this.selectedUser = user;
+            try {
+                const [projRes, dbRes] = await Promise.all([
+                    this.apiFetch(`/api/settings/users/${user.id}/projects`),
+                    this.apiFetch(`/api/settings/users/${user.id}/databases`)
+                ]);
+                const projData = await projRes.json();
+                const dbData = await dbRes.json();
+                this.userProjects = projData.projects || [];
+                this.userDatabases = dbData.databases || [];
+                this.showModal = 'view-user-profile';
+            } catch (err) {
+                this.showToast('Failed to load user profile', 'error');
+            }
+        },
+
+        // ========== Plan Management ==========
         editPlan(plan) {
             this.planForm = { ...plan };
             this.showModal = 'edit-plan';
@@ -411,7 +489,7 @@ document.addEventListener('alpine:init', () => {
             try {
                 const method = this.showModal === 'create-plan' ? 'POST' : 'PUT';
                 const url = this.showModal === 'create-plan' ? '/api/settings/plans' : `/api/settings/plans/${this.planForm.id}`;
-                
+
                 const res = await this.apiFetch(url, {
                     method,
                     headers: { 'Content-Type': 'application/json' },
@@ -431,15 +509,10 @@ document.addEventListener('alpine:init', () => {
         },
 
         async deletePlan(plan) {
-            if (!confirm(`Are you sure you want to delete plan "${plan.name}"? Users on this plan will be moved to another plan.`)) return;
+            if (!confirm(`Delete plan "${plan.name}"? Users will be moved to another plan.`)) return;
             try {
-                const res = await this.apiFetch(`/api/settings/plans/${plan.id}`, {
-                    method: 'DELETE'
-                });
-                if (!res.ok) {
-                    const data = await res.json();
-                    throw new Error(data.error || 'Failed to delete plan');
-                }
+                const res = await this.apiFetch(`/api/settings/plans/${plan.id}`, { method: 'DELETE' });
+                if (!res.ok) { const d = await res.json(); throw new Error(d.error); }
                 this.showToast('Plan deleted', 'success');
                 this.fetchPlans();
             } catch (err) {
@@ -447,37 +520,177 @@ document.addEventListener('alpine:init', () => {
             }
         },
 
-        async deleteUser(user) {
-            if (!confirm(`Delete user ${user.email}?`)) return;
+        // ========== Role Management ==========
+        editRole(role) {
+            this.roleForm = { ...role, permissionIds: [] };
+            this.fetchRolePermissions(role.id);
+            this.showModal = 'edit-role';
+        },
+
+        async fetchRolePermissions(roleId) {
             try {
-                const res = await this.apiFetch(`/api/settings/users/${user.id}`, {
-                    method: 'DELETE'
+                const res = await this.apiFetch(`/api/settings/roles/${roleId}/permissions`);
+                const data = await res.json();
+                this.allPermissions = data.permissions || [];
+                this.roleForm.permissionIds = this.allPermissions.filter(p => p.assigned).map(p => p.id);
+            } catch (err) {
+                console.error('Failed to fetch permissions', err);
+            }
+        },
+
+        togglePermission(permId) {
+            const idx = this.roleForm.permissionIds.indexOf(permId);
+            if (idx >= 0) {
+                this.roleForm.permissionIds.splice(idx, 1);
+            } else {
+                this.roleForm.permissionIds.push(permId);
+            }
+        },
+
+        async saveRole() {
+            this.loading = true;
+            try {
+                const method = this.showModal === 'create-role' ? 'POST' : 'PUT';
+                const url = this.showModal === 'create-role' ? '/api/settings/roles' : `/api/settings/roles/${this.roleForm.id}`;
+
+                const res = await this.apiFetch(url, {
+                    method,
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(this.roleForm)
                 });
-                if (!res.ok) throw new Error('Failed to delete user');
-                this.showToast('User deleted', 'success');
-                this.fetchUsers();
+                const data = await res.json();
+                if (data.error) throw new Error(data.error);
+
+                this.showToast(this.showModal === 'create-role' ? 'Role created' : 'Role updated', 'success');
+                this.showModal = null;
+                this.fetchRoles();
+            } catch (err) {
+                this.showToast(err.message, 'error');
+            } finally {
+                this.loading = false;
+            }
+        },
+
+        async deleteRole(role) {
+            if (role.is_system) return this.showToast('Cannot delete system roles', 'error');
+            if (!confirm(`Delete role "${role.display_name}"?`)) return;
+            try {
+                const res = await this.apiFetch(`/api/settings/roles/${role.id}`, { method: 'DELETE' });
+                if (!res.ok) { const d = await res.json(); throw new Error(d.error); }
+                this.showToast('Role deleted', 'success');
+                this.fetchRoles();
             } catch (err) {
                 this.showToast(err.message, 'error');
             }
         },
 
-        async uploadFile(event) {
-            const file = event.target.files[0];
-            if (!file) return;
+        // ========== Approvals ==========
+        async approveRequest(approval) {
+            try {
+                const res = await this.apiFetch(`/api/settings/approvals/${approval.id}/approve`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ review_note: 'Approved by admin' })
+                });
+                if (!res.ok) throw new Error('Failed to approve');
+                this.showToast('Request approved', 'success');
+                this.fetchApprovals();
+            } catch (err) {
+                this.showToast(err.message, 'error');
+            }
+        },
 
-            const formData = new FormData();
-            formData.append('file', file);
+        async rejectRequest(approval) {
+            const note = prompt('Rejection reason (optional):');
+            try {
+                const res = await this.apiFetch(`/api/settings/approvals/${approval.id}/reject`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ review_note: note || 'Rejected by admin' })
+                });
+                if (!res.ok) throw new Error('Failed to reject');
+                this.showToast('Request rejected', 'success');
+                this.fetchApprovals();
+            } catch (err) {
+                this.showToast(err.message, 'error');
+            }
+        },
 
+        // ========== Platform Settings ==========
+        async savePlatformSettings() {
             this.loading = true;
             try {
-                const res = await this.apiFetch('/api/cdn/upload', {
-                    method: 'POST',
-                    body: formData
+                const settings = {};
+                for (const [category, items] of Object.entries(this.platformSettings)) {
+                    for (const [key, item] of Object.entries(items)) {
+                        settings[key] = item.value;
+                    }
+                }
+
+                const res = await this.apiFetch('/api/settings/platform-settings', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ settings })
                 });
                 const data = await res.json();
                 if (data.error) throw new Error(data.error);
+                this.showToast('Settings saved', 'success');
+            } catch (err) {
+                this.showToast(err.message, 'error');
+            } finally {
+                this.loading = false;
+            }
+        },
 
-                this.showToast('File uploaded successfully', 'success');
+        updateSettingValue(category, key, value) {
+            if (this.platformSettings[category] && this.platformSettings[category][key]) {
+                this.platformSettings[category][key].value = value;
+            }
+        },
+
+        // ========== Custom Domains ==========
+        async addDomain() {
+            if (!this.domainForm.domain) return;
+            try {
+                const res = await this.apiFetch('/api/settings/domains', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(this.domainForm)
+                });
+                const data = await res.json();
+                if (data.error) throw new Error(data.error);
+                this.showToast('Domain added', 'success');
+                this.domainForm = { domain: '', projectId: null };
+                this.fetchDomains();
+            } catch (err) {
+                this.showToast(err.message, 'error');
+            }
+        },
+
+        async deleteDomain(domain) {
+            if (!confirm(`Remove domain ${domain.domain}?`)) return;
+            try {
+                const res = await this.apiFetch(`/api/settings/domains/${domain.id}`, { method: 'DELETE' });
+                if (!res.ok) throw new Error('Failed');
+                this.showToast('Domain removed', 'success');
+                this.fetchDomains();
+            } catch (err) {
+                this.showToast(err.message, 'error');
+            }
+        },
+
+        // ========== File Upload ==========
+        async uploadFile(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            const formData = new FormData();
+            formData.append('file', file);
+            this.loading = true;
+            try {
+                const res = await this.apiFetch('/api/cdn/upload', { method: 'POST', body: formData });
+                const data = await res.json();
+                if (data.error) throw new Error(data.error);
+                this.showToast('File uploaded', 'success');
                 this.showModal = null;
                 this.fetchCdnFiles();
             } catch (err) {
@@ -490,10 +703,8 @@ document.addEventListener('alpine:init', () => {
         async deleteCdnFile(filename) {
             if (!confirm(`Delete ${filename}?`)) return;
             try {
-                const res = await this.apiFetch(`/api/cdn/${filename}`, {
-                    method: 'DELETE'
-                });
-                if (!res.ok) throw new Error('Failed to delete file');
+                const res = await this.apiFetch(`/api/cdn/${filename}`, { method: 'DELETE' });
+                if (!res.ok) throw new Error('Failed');
                 this.showToast('File deleted', 'success');
                 this.fetchCdnFiles();
             } catch (err) {
@@ -502,19 +713,15 @@ document.addEventListener('alpine:init', () => {
         },
 
         calculateCdnStorage() {
-            const totalBytes = this.cdnFiles.reduce((acc, file) => acc + (file.size || 0), 0);
-            return (totalBytes / (1024 * 1024)).toFixed(1);
+            return (this.cdnFiles.reduce((acc, file) => acc + (file.size || 0), 0) / (1024 * 1024)).toFixed(1);
         },
 
+        // ========== Project Management ==========
         async deleteProject(project) {
-            if (!confirm(`Are you sure you want to delete ${project.name}? This will stop all containers and delete all files.`)) return;
-            
+            if (!confirm(`Delete ${project.name}? This will stop all processes and delete all files.`)) return;
             try {
-                const res = await this.apiFetch(`/api/projects/${project.id}`, {
-                    method: 'DELETE'
-                });
-                if (!res.ok) throw new Error('Failed to delete project');
-                
+                const res = await this.apiFetch(`/api/projects/${project.id}`, { method: 'DELETE' });
+                if (!res.ok) throw new Error('Failed');
                 this.selectedProject = null;
                 this.fetchProjects();
                 this.showToast('Project deleted', 'success');
@@ -523,10 +730,37 @@ document.addEventListener('alpine:init', () => {
             }
         },
 
+        selectProject(project) {
+            this.selectedProject = project;
+            this.buildLogs = [];
+            this.projectTab = 'logs';
+            this.fetchProjectDeployments(project.id);
+        },
+
+        async fetchProjectDeployments(projectId) {
+            try {
+                const res = await this.apiFetch(`/api/deployments/project/${projectId}`);
+                const data = await res.json();
+                this.projectDeployments = data.deployments || [];
+                if (this.projectDeployments.length > 0) {
+                    const latest = this.projectDeployments[0];
+                    if (latest.build_logs) {
+                        this.buildLogs = [{ timestamp: latest.deployed_at || latest.created_at, message: latest.build_logs, type: 'info' }];
+                    }
+                }
+            } catch (err) {
+                console.error('Failed to fetch deployments', err);
+            }
+        },
+
+        viewDeploymentLogs(deployment) {
+            this.buildLogs = [{ timestamp: deployment.deployed_at || deployment.created_at, message: deployment.build_logs || 'No logs', type: 'info' }];
+            this.projectTab = 'logs';
+        },
+
+        // ========== Sharing ==========
         async openSharing(resource, type) {
-            this.sharingForm.resourceId = resource.id;
-            this.sharingForm.resourceType = type;
-            this.sharingForm.email = '';
+            this.sharingForm = { resourceId: resource.id, resourceType: type, email: '', sharedUsers: [] };
             this.showModal = 'share-resource';
             await this.fetchSharedUsers();
         },
@@ -547,16 +781,11 @@ document.addEventListener('alpine:init', () => {
                 const res = await this.apiFetch('/api/sharing', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        resourceId: this.sharingForm.resourceId,
-                        resourceType: this.sharingForm.resourceType,
-                        email: this.sharingForm.email
-                    })
+                    body: JSON.stringify({ resourceId: this.sharingForm.resourceId, resourceType: this.sharingForm.resourceType, email: this.sharingForm.email })
                 });
                 const data = await res.json();
                 if (data.error) throw new Error(data.error);
-
-                this.showToast('Resource shared successfully', 'success');
+                this.showToast('Shared successfully', 'success');
                 this.sharingForm.email = '';
                 await this.fetchSharedUsers();
             } catch (err) {
@@ -566,10 +795,8 @@ document.addEventListener('alpine:init', () => {
 
         async removeSharing(sharedId) {
             try {
-                const res = await this.apiFetch(`/api/sharing/${sharedId}`, {
-                    method: 'DELETE'
-                });
-                if (!res.ok) throw new Error('Failed to remove sharing');
+                const res = await this.apiFetch(`/api/sharing/${sharedId}`, { method: 'DELETE' });
+                if (!res.ok) throw new Error('Failed');
                 this.showToast('Sharing removed', 'success');
                 await this.fetchSharedUsers();
             } catch (err) {
@@ -577,6 +804,7 @@ document.addEventListener('alpine:init', () => {
             }
         },
 
+        // ========== Status Pages ==========
         async fetchStatusPages() {
             try {
                 const res = await this.apiFetch('/api/status');
@@ -601,8 +829,6 @@ document.addEventListener('alpine:init', () => {
             const [type, id] = key.split(':');
             this.statusPageForm.items[index].resource_id = parseInt(id);
             this.statusPageForm.items[index].resource_type = type;
-            
-            // Auto-fill display name if empty
             if (!this.statusPageForm.items[index].display_name) {
                 const resource = type === 'project' ? this.projects.find(p => p.id === parseInt(id)) : this.databases.find(d => d.id === parseInt(id));
                 if (resource) this.statusPageForm.items[index].display_name = resource.name;
@@ -614,15 +840,9 @@ document.addEventListener('alpine:init', () => {
             try {
                 const method = this.showModal === 'create-status' ? 'POST' : 'PUT';
                 const url = this.showModal === 'create-status' ? '/api/status' : `/api/status/${this.statusPageForm.id}`;
-                
-                const res = await this.apiFetch(url, {
-                    method,
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(this.statusPageForm)
-                });
+                const res = await this.apiFetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(this.statusPageForm) });
                 const data = await res.json();
                 if (data.error) throw new Error(data.error);
-
                 this.showToast(this.showModal === 'create-status' ? 'Status page created' : 'Status page updated', 'success');
                 this.showModal = null;
                 this.fetchStatusPages();
@@ -638,29 +858,20 @@ document.addEventListener('alpine:init', () => {
             try {
                 const res = await this.apiFetch(`/api/status/${page.id}/items`);
                 const data = await res.json();
-                
-                this.statusPageForm = { 
-                    ...page, 
-                    items: data.items.map(item => ({
-                        ...item,
-                        resource_key: `${item.resource_type}:${item.resource_id}`
-                    })) 
-                };
+                this.statusPageForm = { ...page, items: data.items.map(item => ({ ...item, resource_key: `${item.resource_type}:${item.resource_id}` })) };
                 this.showModal = 'edit-status';
             } catch (err) {
-                this.showToast('Failed to load status page items', 'error');
+                this.showToast('Failed to load items', 'error');
             } finally {
                 this.loading = false;
             }
         },
 
         async deleteStatusPage(id) {
-            if (!confirm('Are you sure you want to delete this status page?')) return;
+            if (!confirm('Delete this status page?')) return;
             try {
-                const res = await this.apiFetch(`/api/status/${id}`, {
-                    method: 'DELETE'
-                });
-                if (!res.ok) throw new Error('Failed to delete status page');
+                const res = await this.apiFetch(`/api/status/${id}`, { method: 'DELETE' });
+                if (!res.ok) throw new Error('Failed');
                 this.showToast('Status page deleted', 'success');
                 this.fetchStatusPages();
             } catch (err) {
@@ -668,71 +879,17 @@ document.addEventListener('alpine:init', () => {
             }
         },
 
-        selectProject(project) {
-            this.selectedProject = project;
-            this.buildLogs = [];
-            this.projectTab = 'logs';
-            this.fetchProjectDeployments(project.id);
-        },
-
-        async fetchProjectDeployments(projectId) {
-            try {
-                const res = await this.apiFetch(`/api/deployments/project/${projectId}`);
-                const data = await res.json();
-                this.projectDeployments = data.deployments || [];
-                
-                if (this.projectDeployments.length > 0) {
-                    const latest = this.projectDeployments[0];
-                    if (latest.build_logs) {
-                        this.buildLogs = [{
-                            timestamp: latest.deployed_at || latest.created_at,
-                            message: latest.build_logs,
-                            type: 'info'
-                        }];
-                    }
-                }
-            } catch (err) {
-                console.error('Failed to fetch deployments', err);
-            }
-        },
-
-        viewDeploymentLogs(deployment) {
-            this.buildLogs = [{
-                timestamp: deployment.deployed_at || deployment.created_at,
-                message: deployment.build_logs || 'No logs available for this deployment',
-                type: 'info'
-            }];
-            this.projectTab = 'logs';
-        },
-
+        // ========== Helpers ==========
         getProjectIcon(type) {
-            const icons = {
-                'nodejs': 'fab fa-node-js',
-                'python': 'fab fa-python',
-                'static': 'fas fa-file-code',
-                'react': 'fab fa-react',
-                'nextjs': 'fas fa-n'
-            };
-            return icons[type] || 'fas fa-code';
+            return { 'nodejs': 'fab fa-node-js', 'python': 'fab fa-python', 'static': 'fas fa-file-code', 'react': 'fab fa-react', 'nextjs': 'fas fa-n' }[type] || 'fas fa-code';
         },
 
         getDbIcon(type) {
-            const icons = {
-                'postgres': 'fas fa-elephant',
-                'redis': 'fas fa-bolt',
-                'mongodb': 'fas fa-leaf'
-            };
-            return icons[type.toLowerCase()] || 'fas fa-database';
+            return { 'postgres': 'fas fa-elephant', 'redis': 'fas fa-bolt' }[type?.toLowerCase()] || 'fas fa-database';
         },
 
         getStatusClass(status) {
-            const classes = {
-                'active': 'bg-green-100 text-green-700',
-                'building': 'bg-blue-100 text-blue-700 animate-pulse',
-                'failed': 'bg-red-100 text-red-700',
-                'inactive': 'bg-gray-100 text-gray-700'
-            };
-            return classes[status] || 'bg-gray-100 text-gray-700';
+            return { 'active': 'bg-green-100 text-green-700', 'building': 'bg-blue-100 text-blue-700 animate-pulse', 'failed': 'bg-red-100 text-red-700', 'inactive': 'bg-gray-100 text-gray-700' }[status] || 'bg-gray-100 text-gray-700';
         },
 
         formatDate(date) {
@@ -741,7 +898,7 @@ document.addEventListener('alpine:init', () => {
         },
 
         formatSize(bytes) {
-            if (bytes === 0) return '0 Bytes';
+            if (!bytes || bytes === 0) return '0 Bytes';
             const k = 1024;
             const sizes = ['Bytes', 'KB', 'MB', 'GB'];
             const i = Math.floor(Math.log(bytes) / Math.log(k));
@@ -759,9 +916,7 @@ document.addEventListener('alpine:init', () => {
         showToast(message, type = 'success') {
             const id = Date.now();
             this.toasts.push({ id, message, type });
-            setTimeout(() => {
-                this.toasts = this.toasts.filter(t => t.id !== id);
-            }, 5000);
+            setTimeout(() => { this.toasts = this.toasts.filter(t => t.id !== id); }, 5000);
         },
 
         copy(text) {
@@ -771,8 +926,7 @@ document.addEventListener('alpine:init', () => {
 
         getGitHubYaml() {
             if (!this.selectedProject) return '';
-            const webhookUrl = `http://${this.selectedProject.duckdns_subdomain}.${this.systemStats?.duckdns_root || 'duckdns.org'}/api/deployments/webhook`;
-            
+            const webhookUrl = `${this.systemStats?.platform_url || window.location.origin}/api/deployments/webhook`;
             return `name: Deploy to OpenHost
 on:
   push:
@@ -782,15 +936,13 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Trigger OpenHost Re-deployment
+      - name: Trigger OpenHost Deployment
         run: |
           curl -X POST "${webhookUrl}" \\
           -H "Content-Type: application/json" \\
           -d "{\\"projectId\\": \\"\${{ secrets.OPENHOST_PROJECT_ID }}\\", \\"token\\": \\"\${{ secrets.OPENHOST_DEPLOY_TOKEN }}\\"}"`;
         },
 
-        copyGitHubYaml() {
-            this.copy(this.getGitHubYaml());
-        }
+        copyGitHubYaml() { this.copy(this.getGitHubYaml()); }
     }));
 });

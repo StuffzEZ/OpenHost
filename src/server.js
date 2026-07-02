@@ -1,5 +1,4 @@
 const express = require('express');
-const session = require('express-session');
 const helmet = require('helmet');
 const cors = require('cors');
 const rateLimit = require('express-rate-limit');
@@ -24,17 +23,16 @@ const app = express();
 const server = http.createServer(app);
 const io = socketIo(server, {
     cors: {
-        origin: '*',
+        origin: process.env.NODE_ENV === 'production' ? false : '*',
         methods: ['GET', 'POST']
     }
 });
 
 const PORT = process.env.PORT || 3000;
 
-// Make io accessible to routes
 app.set('io', io);
 
-// Middleware
+// Security middleware
 app.use(helmet({
     contentSecurityPolicy: false,
     crossOriginEmbedderPolicy: false,
@@ -44,32 +42,35 @@ app.use(helmet({
 app.use(cors());
 
 // Rate limiting
-const limiter = rateLimit({
-    windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 100, // Limit each IP to 100 requests per windowMs
+const apiLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 200,
     message: { error: 'Too many requests, please try again later.' }
 });
-app.use('/api/', limiter);
+
+const authLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 20,
+    message: { error: 'Too many authentication attempts, please try again later.' }
+});
+
+app.use('/api/', apiLimiter);
+app.use('/api/auth/login', authLimiter);
+app.use('/api/auth/register', authLimiter);
 
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
-// Session configuration
-app.use(session({
-    secret: process.env.SESSION_SECRET || 'openhost-secret-key',
-    resave: false,
-    saveUninitialized: false,
-    cookie: {
-        secure: process.env.NODE_ENV === 'production',
-        httpOnly: true,
-        maxAge: 24 * 60 * 60 * 1000 // 24 hours
-    }
-}));
-
-// Serve static files
+// Serve static files (dashboard)
 app.use(express.static(path.join(__dirname, '../public')));
 
-// Routes
+// Serve CDN files with auth check
+app.use('/cdn', async (req, res, next) => {
+    // CDN files served without auth (public URLs) but access is controlled at upload
+    next();
+}, express.static(path.join(__dirname, '../public/cdn')));
+
+// API Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/deployments', deploymentRoutes);
 app.use('/api/projects', projectRoutes);
@@ -83,7 +84,7 @@ app.use('/api/status', statusRoutes);
 app.get('/status/:slug', async (req, res) => {
     try {
         const pageResult = await query('SELECT * FROM status_pages WHERE slug = $1', [req.params.slug]);
-        
+
         if (pageResult.rows.length === 0) {
             return res.status(404).send('Status page not found');
         }
@@ -94,15 +95,15 @@ app.get('/status/:slug', async (req, res) => {
         }
 
         const itemsResult = await query(`
-            SELECT si.*, 
-            CASE 
+            SELECT si.*,
+            CASE
                 WHEN si.resource_type = 'project' THEN (SELECT status FROM projects WHERE id = si.resource_id)
                 WHEN si.resource_type = 'database' THEN (SELECT status FROM databases WHERE id = si.resource_id)
             END as status,
-            CASE 
+            CASE
                 WHEN si.resource_type = 'project' AND $2 = true THEN (
-                    SELECT created_at FROM deployments 
-                    WHERE project_id = si.resource_id AND status = 'success' 
+                    SELECT created_at FROM deployments
+                    WHERE project_id = si.resource_id AND status = 'success'
                     ORDER BY created_at DESC LIMIT 1
                 )
                 ELSE NULL
@@ -117,44 +118,27 @@ app.get('/status/:slug', async (req, res) => {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>${page.title} - OpenHost Status</title>
+    <title>${page.title.replace(/</g, '&lt;').replace(/>/g, '&gt;')} - Status</title>
     <link rel="stylesheet" href="/css/tailwind.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-    <style>
-        .dark { background-color: #0f172a; color: #f8fafc; }
-        .dark .card { background-color: #1e293b; border-color: #334155; }
-        .dark h1, .dark h3 { color: white; }
-        .dark .text-gray-900 { color: #f8fafc; }
-        .dark .text-gray-800 { color: #f1f5f9; }
-        .dark .bg-white { background-color: #1e293b; }
-        .dark .border-gray-200 { border-color: #334155; }
-    </style>
     <script>
         if (localStorage.getItem('oh_dark_mode') === 'true') {
             document.documentElement.classList.add('dark');
         }
     </script>
 </head>
-<body class="bg-gray-50 min-h-screen py-12 transition-colors duration-200">
+<body class="bg-gray-50 min-h-screen py-12">
     <div class="max-w-3xl mx-auto px-4">
         <div class="text-center mb-12">
-            <h1 class="text-4xl font-bold mb-4 text-gray-900">${page.title}</h1>
-            ${page.description ? `<p class="text-gray-500 dark:text-gray-400 text-lg">${page.description}</p>` : ''}
+            <h1 class="text-4xl font-bold mb-4">${page.title.replace(/</g, '&lt;')}</h1>
+            ${page.description ? `<p class="text-gray-500 text-lg">${page.description.replace(/</g, '&lt;')}</p>` : ''}
         </div>
-
         <div class="space-y-4">
             ${itemsResult.rows.map(item => `
-                <div class="card bg-white p-6 rounded-2xl border border-gray-200 shadow-sm flex items-center justify-between">
+                <div class="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm flex items-center justify-between">
                     <div>
-                        <div class="flex items-center gap-3">
-                            <i class="fas ${item.resource_type === 'project' ? 'fa-rocket text-blue-500' : 'fa-database text-purple-500'}"></i>
-                            <h3 class="font-bold text-xl text-gray-800">${item.display_name}</h3>
-                        </div>
-                        ${item.last_deployment ? `
-                            <p class="text-xs text-gray-400 mt-1 uppercase font-bold tracking-widest">
-                                Last Deployed: ${new Date(item.last_deployment).toLocaleString()}
-                            </p>
-                        ` : ''}
+                        <h3 class="font-bold text-xl">${item.display_name.replace(/</g, '&lt;')}</h3>
+                        ${item.last_deployment ? `<p class="text-xs text-gray-400 mt-1 uppercase font-bold tracking-widest">Last Deployed: ${new Date(item.last_deployment).toLocaleString()}</p>` : ''}
                     </div>
                     <div class="flex items-center gap-2">
                         <span class="w-3 h-3 rounded-full ${item.status === 'active' || item.status === 'success' ? 'bg-green-500' : 'bg-red-500'} animate-pulse"></span>
@@ -164,11 +148,9 @@ app.get('/status/:slug', async (req, res) => {
                     </div>
                 </div>
             `).join('')}
-            ${itemsResult.rows.length === 0 ? '<p class="text-center text-gray-400 italic">No items monitored on this page.</p>' : ''}
         </div>
-
-        <div class="mt-12 pt-8 border-t border-gray-200 dark:border-gray-800 text-center">
-            <p class="text-gray-400 text-sm">Powered by <span class="font-bold text-black dark:text-white">OpenHost</span></p>
+        <div class="mt-12 pt-8 border-t border-gray-200 text-center">
+            <p class="text-gray-400 text-sm">Powered by <span class="font-bold text-black">OpenHost</span></p>
         </div>
     </div>
 </body>
@@ -181,8 +163,13 @@ app.get('/status/:slug', async (req, res) => {
 });
 
 // Health check
-app.get('/health', (req, res) => {
-    res.json({ status: 'healthy', timestamp: new Date().toISOString() });
+app.get('/health', async (req, res) => {
+    try {
+        await query('SELECT 1');
+        res.json({ status: 'healthy', timestamp: new Date().toISOString(), version: '2.0.0' });
+    } catch (error) {
+        res.status(503).json({ status: 'unhealthy', error: 'Database connection failed' });
+    }
 });
 
 // Serve dashboard for all other routes
@@ -190,36 +177,33 @@ app.get('*', (req, res) => {
     res.sendFile(path.join(__dirname, '../public/index.html'));
 });
 
-// WebSocket for real-time build logs
+// WebSocket
 io.on('connection', (socket) => {
-    logger.info('Client connected to WebSocket');
-    
+    logger.debug('Client connected to WebSocket');
     socket.on('disconnect', () => {
-        logger.info('Client disconnected from WebSocket');
+        logger.debug('Client disconnected from WebSocket');
     });
 });
 
 // Error handling
-app.use((err, req, res, next) => {
+app.use((err, req, res, _next) => {
     logger.error('Server error:', err);
-    res.status(500).json({ 
+    res.status(500).json({
         error: 'Internal server error',
         message: process.env.NODE_ENV === 'development' ? err.message : undefined
     });
 });
 
-// Initialize database and start server
 async function start() {
     try {
         await initDatabase();
         logger.info('Database initialized successfully');
-        
-        // Initialize active projects
+
         await deploymentService.initializeAllProjects(io);
-        
+
         server.listen(PORT, '0.0.0.0', () => {
             logger.info(`OpenHost server running on port ${PORT}`);
-            logger.info(`Environment: ${process.env.NODE_ENV}`);
+            logger.info(`Environment: ${process.env.NODE_ENV || 'development'}`);
         });
     } catch (error) {
         logger.error('Failed to start server:', error);

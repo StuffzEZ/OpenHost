@@ -1,7 +1,7 @@
 const express = require('express');
 const { query } = require('../services/database');
 const deploymentService = require('../services/deployment');
-const { authenticateToken } = require('../middleware/auth');
+const { authenticateToken, requirePermission } = require('../middleware/auth');
 const logger = require('../utils/logger');
 
 const router = express.Router();
@@ -10,15 +10,21 @@ const router = express.Router();
 router.get('/project/:projectId', authenticateToken, async (req, res) => {
     try {
         const { projectId } = req.params;
-        
-        const result = await query(
-            `SELECT d.* FROM deployments d
-             JOIN projects p ON d.project_id = p.id
-             WHERE p.id = $1 AND p.user_id = $2
-             ORDER BY d.created_at DESC`,
-            [projectId, req.user.userId]
-        );
 
+        let sql, params;
+        if (req.user.isAdmin || req.user.isModerator) {
+            sql = `SELECT d.* FROM deployments d WHERE d.project_id = $1 ORDER BY d.created_at DESC`;
+            params = [projectId];
+        } else {
+            sql = `SELECT d.* FROM deployments d
+                   JOIN projects p ON d.project_id = p.id
+                   WHERE p.id = $1 AND (p.user_id = $2
+                   OR p.id IN (SELECT resource_id FROM shared_access WHERE resource_type = 'project' AND user_id = $2))
+                   ORDER BY d.created_at DESC`;
+            params = [projectId, req.user.userId];
+        }
+
+        const result = await query(sql, params);
         res.json({ deployments: result.rows });
     } catch (error) {
         logger.error('Get deployments error:', error);
@@ -26,7 +32,7 @@ router.get('/project/:projectId', authenticateToken, async (req, res) => {
     }
 });
 
-// Create deployment trigger via webhook (GitHub Workflow)
+// Webhook deployment trigger (CI/CD)
 router.post('/webhook', async (req, res) => {
     try {
         const { projectId, token } = req.body;
@@ -35,7 +41,6 @@ router.post('/webhook', async (req, res) => {
             return res.status(400).json({ error: 'Project ID and Token are required' });
         }
 
-        // Get project and check token
         const projectResult = await query(
             'SELECT * FROM projects WHERE id = $1 AND deploy_token = $2',
             [projectId, token]
@@ -47,36 +52,27 @@ router.post('/webhook', async (req, res) => {
 
         const project = projectResult.rows[0];
 
-        // Check if user has DuckDNS permission (required for CI/CD)
-        const userQuota = await query(`
-            SELECT p.can_use_duckdns
-            FROM users u
-            JOIN plans p ON u.plan_id = p.id
-            WHERE u.id = $1
-        `, [project.user_id]);
-
-        if (userQuota.rows.length === 0 || !userQuota.rows[0].can_use_duckdns) {
-            return res.status(403).json({ error: 'GitHub Workflow trigger requires a plan with DuckDNS permissions.' });
+        if (!project.auto_deploy) {
+            return res.status(403).json({ error: 'Auto-deploy is disabled for this project' });
         }
 
-        // Trigger deployment logic
         const deploymentResult = await query(
-            `INSERT INTO deployments (project_id, version, status) 
+            `INSERT INTO deployments (project_id, version, status)
              VALUES ($1, $2, $3) RETURNING *`,
             [projectId, `CI-${new Date().toISOString()}`, 'building']
         );
 
         const deployment = deploymentResult.rows[0];
         const io = req.app.get('io');
-        
+
         deploymentService.buildAndDeploy(project, io)
             .then(async (result) => {
                 await query(
-                    `UPDATE deployments SET status = $1, deploy_url = $2, deployed_at = NOW() 
+                    `UPDATE deployments SET status = $1, deploy_url = $2, deployed_at = NOW()
                      WHERE id = $3`,
                     ['success', result.url, deployment.id]
                 );
-                await query('UPDATE projects SET status = $1, updated_at = NOW() WHERE id = $2', ['active', projectId]);
+                await query('UPDATE projects SET status = $1, last_deployed_at = NOW(), updated_at = NOW() WHERE id = $2', ['active', projectId]);
                 io.emit('deployment-complete', { deploymentId: deployment.id, projectId, status: 'success' });
             })
             .catch(async (error) => {
@@ -92,15 +88,19 @@ router.post('/webhook', async (req, res) => {
 });
 
 // Create new deployment manually
-router.post('/', authenticateToken, async (req, res) => {
+router.post('/', authenticateToken, requirePermission('projects.deploy'), async (req, res) => {
     try {
         const { projectId } = req.body;
 
-        // Get project
-        const projectResult = await query(
-            'SELECT * FROM projects WHERE id = $1 AND user_id = $2',
-            [projectId, req.user.userId]
-        );
+        let projectResult;
+        if (req.user.isAdmin || req.user.isModerator) {
+            projectResult = await query('SELECT * FROM projects WHERE id = $1', [projectId]);
+        } else {
+            projectResult = await query(
+                'SELECT * FROM projects WHERE id = $1 AND user_id = $2',
+                [projectId, req.user.userId]
+            );
+        }
 
         if (projectResult.rows.length === 0) {
             return res.status(404).json({ error: 'Project not found' });
@@ -108,31 +108,46 @@ router.post('/', authenticateToken, async (req, res) => {
 
         const project = projectResult.rows[0];
 
-        // Create deployment record
+        // Check if approval is required
+        const approvalSetting = await query("SELECT value FROM platform_settings WHERE key = 'require_approval'");
+        const requireApproval = approvalSetting.rows[0]?.value === 'true';
+
+        if (requireApproval && !req.user.isAdmin) {
+            // Create approval request
+            const approvalResult = await query(
+                `INSERT INTO admin_approvals (user_id, resource_type, resource_name, request_data, status)
+                 VALUES ($1, 'deployment', $2, $3, 'pending') RETURNING *`,
+                [req.user.userId, project.name, JSON.stringify({ projectId, projectName: project.name })]
+            );
+
+            return res.status(202).json({
+                message: 'Deployment submitted for admin approval',
+                approvalId: approvalResult.rows[0].id
+            });
+        }
+
         const deploymentResult = await query(
-            `INSERT INTO deployments (project_id, version, status) 
+            `INSERT INTO deployments (project_id, version, status)
              VALUES ($1, $2, $3) RETURNING *`,
             [projectId, new Date().toISOString(), 'building']
         );
 
         const deployment = deploymentResult.rows[0];
-
-        // Start deployment process asynchronously
         const io = req.app.get('io');
-        
+
+        await query('UPDATE projects SET status = $1 WHERE id = $2', ['building', projectId]);
+
         deploymentService.buildAndDeploy(project, io)
             .then(async (result) => {
                 await query(
-                    `UPDATE deployments SET status = $1, deploy_url = $2, deployed_at = NOW() 
+                    `UPDATE deployments SET status = $1, deploy_url = $2, deployed_at = NOW()
                      WHERE id = $3`,
                     ['success', result.url, deployment.id]
                 );
-                
                 await query(
-                    'UPDATE projects SET status = $1, updated_at = NOW() WHERE id = $2',
+                    'UPDATE projects SET status = $1, last_deployed_at = NOW(), updated_at = NOW() WHERE id = $2',
                     ['active', projectId]
                 );
-
                 io.emit('deployment-complete', {
                     deploymentId: deployment.id,
                     projectId,
@@ -145,7 +160,7 @@ router.post('/', authenticateToken, async (req, res) => {
                     `UPDATE deployments SET status = $1, build_logs = $2 WHERE id = $3`,
                     ['failed', error.message, deployment.id]
                 );
-
+                await query('UPDATE projects SET status = $1 WHERE id = $2', ['failed', projectId]);
                 io.emit('deployment-complete', {
                     deploymentId: deployment.id,
                     projectId,
@@ -154,7 +169,7 @@ router.post('/', authenticateToken, async (req, res) => {
                 });
             });
 
-        res.status(202).json({ 
+        res.status(202).json({
             message: 'Deployment started',
             deployment: deployment
         });
@@ -169,13 +184,19 @@ router.get('/:id/logs', authenticateToken, async (req, res) => {
     try {
         const { id } = req.params;
 
-        const result = await query(
-            `SELECT d.build_logs FROM deployments d
-             JOIN projects p ON d.project_id = p.id
-             WHERE d.id = $1 AND p.user_id = $2`,
-            [id, req.user.userId]
-        );
+        let sql, params;
+        if (req.user.isAdmin || req.user.isModerator) {
+            sql = 'SELECT d.build_logs FROM deployments d WHERE d.id = $1';
+            params = [id];
+        } else {
+            sql = `SELECT d.build_logs FROM deployments d
+                   JOIN projects p ON d.project_id = p.id
+                   WHERE d.id = $1 AND (p.user_id = $2
+                   OR p.id IN (SELECT resource_id FROM shared_access WHERE resource_type = 'project' AND user_id = $2))`;
+            params = [id, req.user.userId];
+        }
 
+        const result = await query(sql, params);
         if (result.rows.length === 0) {
             return res.status(404).json({ error: 'Deployment not found' });
         }
